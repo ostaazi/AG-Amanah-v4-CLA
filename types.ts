@@ -96,11 +96,16 @@ export type AlertProtocolMode = 'FULL' | 'SIMPLE' | 'NONE';
 
 export interface ParentAccount extends FamilyMember {
   pushEnabled?: boolean;
-  twoFASecret?: string;
+  twoFASecret?: string; // Deprecated: moved to separate collection in Phase 1.4
   biometricId?: string;
   backupCodes?: string[];
   alertProtocol?: AlertProtocolMode; // Replaces emergencyOverlayEnabled
   emergencyOverlayEnabled?: boolean; // Deprecated but kept for compatibility
+
+  // User-specific encryption (Phase 1.2)
+  encryptionSalt?: string; // Base64-encoded random salt for PBKDF2
+  encryptionIterations?: number; // PBKDF2 iterations (default: 100000)
+  encryptionMigrated?: boolean; // Flag: true if migrated from legacy shared key
 }
 
 export interface ChatMessage {

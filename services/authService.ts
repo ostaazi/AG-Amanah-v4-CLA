@@ -1,12 +1,17 @@
 
-import { 
-    signInWithEmailAndPassword, 
-    createUserWithEmailAndPassword, 
-    signOut, 
+import {
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signOut,
     onAuthStateChanged,
     sendPasswordResetEmail
 } from "firebase/auth";
 import { auth } from "./firebaseConfig";
+import {
+    setSessionPassword,
+    clearSessionPassword,
+    generateSalt
+} from "./cryptoService";
 
 // واجهة المستخدم المؤمنة (نسخة الإنتاج النهائية)
 export interface CloudUser {
@@ -18,12 +23,19 @@ export interface CloudUser {
 /**
  * تسجيل الدخول (الوالدين) - كود محصن فعلياً
  * يستخدم البارامترات المجهزة (Prepared Statements) داخل Firebase SDK
+ *
+ * Phase 1.2: Stores password in session memory for encryption
  */
 export const loginParent = async (email: string, pass: string): Promise<CloudUser> => {
     if (!auth) throw new Error("نواة الأمان غير مهيأة");
-    
+
     try {
         const userCredential = await signInWithEmailAndPassword(auth, email, pass);
+
+        // Store password in session memory for encryption (Phase 1.2)
+        // Password is NOT persisted anywhere - only in memory during session
+        setSessionPassword(pass);
+
         return {
             uid: userCredential.user.uid,
             email: userCredential.user.email,
@@ -37,16 +49,30 @@ export const loginParent = async (email: string, pass: string): Promise<CloudUse
 
 /**
  * تسجيل حساب جديد (الوالدين) - كود محصن فعلياً
+ *
+ * Phase 1.2: Generates encryption salt for new user
+ * Returns salt so it can be stored in parent profile
  */
-export const registerParent = async (email: string, pass: string): Promise<CloudUser> => {
+export const registerParent = async (
+    email: string,
+    pass: string
+): Promise<CloudUser & { encryptionSalt: string }> => {
     if (!auth) throw new Error("نواة الأمان غير مهيأة");
 
     try {
         const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+
+        // Generate unique encryption salt for this user (Phase 1.2)
+        const encryptionSalt = generateSalt();
+
+        // Store password in session memory for encryption
+        setSessionPassword(pass);
+
         return {
             uid: userCredential.user.uid,
             email: userCredential.user.email,
-            isAnonymous: userCredential.user.isAnonymous
+            isAnonymous: userCredential.user.isAnonymous,
+            encryptionSalt, // Return salt so caller can save it to Firestore
         };
     } catch (error: any) {
         throw new Error(mapAuthError(error.code));
@@ -65,8 +91,16 @@ export const resetPassword = async (email: string): Promise<void> => {
     }
 };
 
+/**
+ * Logout user
+ * Phase 1.2: Clears session password from memory
+ */
 export const logoutUser = async () => {
     if (!auth) return;
+
+    // Clear encryption password from session memory (Phase 1.2)
+    clearSessionPassword();
+
     await signOut(auth);
 };
 
