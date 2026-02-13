@@ -169,3 +169,13 @@ export interface CustomMode {
   internetEndTime: string;
   activeDays: number[];
 }
+export interface PairingRequest {
+  id: string; // The anonymous UID of the child device
+  parentId: string;
+  childName: string;
+  model: string;
+  os: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  timestamp: Date | any;
+  childDocumentId?: string; // Set by parent after approval
+}

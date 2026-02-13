@@ -23,6 +23,7 @@ import {
   EvidenceRecord,
   ActivityLog,
   UserRole,
+  PairingRequest,
 } from '../types';
 import { ValidationService } from './validationService';
 
@@ -31,6 +32,8 @@ const PARENTS_COLLECTION = 'parents';
 const ALERTS_COLLECTION = 'alerts';
 const ACTIVITIES_COLLECTION = 'activities';
 const SUPERVISORS_COLLECTION = 'supervisors';
+const PAIRING_REQUESTS_SUBCOLLECTION = 'pairingRequests';
+const PAIRING_KEYS_COLLECTION = 'pairingKeys';
 
 /**
  * Validate document ID to prevent path traversal attacks
@@ -118,14 +121,24 @@ export const sendRemoteCommand = async (childId: string, command: string, value:
 export const rotatePairingKey = async (parentId: string): Promise<string> => {
   if (!db || !parentId) throw new Error('Database not initialized or invalid parentId');
 
-  // Generate 6-digit random code
+  // 1. Generate 6-digit random code
   const newKey = Math.floor(100000 + Math.random() * 900000).toString();
   const expiresAt = Timestamp.fromMillis(Date.now() + 10 * 60 * 1000); // 10 minutes
 
+  // 2. Update parent profile (for reference)
   const parentRef = doc(db, PARENTS_COLLECTION, parentId);
   await updateDoc(parentRef, {
     pairingKey: newKey,
     pairingKeyExpiresAt: expiresAt,
+  });
+
+  // 3. Create a look-up document where the KEY is the ID
+  // This avoids "PERMISSION_DENIED" on collection queries
+  const keyRef = doc(db, PAIRING_KEYS_COLLECTION, newKey);
+  await setDoc(keyRef, {
+    parentId,
+    expiresAt,
+    createdAt: Timestamp.now()
   });
 
   return newKey;
@@ -367,4 +380,51 @@ export const updateAlertStatus = async (alertId: string, status: string): Promis
   if (!db) return;
   const alertRef = doc(db, ALERTS_COLLECTION, alertId);
   await updateDoc(alertRef, { status });
+};
+export const subscribeToPairingRequests = (
+  parentId: string,
+  callback: (requests: PairingRequest[]) => void
+) => {
+  if (!db || !parentId) return () => { };
+  const q = query(
+    collection(db, PARENTS_COLLECTION, parentId, PAIRING_REQUESTS_SUBCOLLECTION),
+    where('status', '==', 'PENDING')
+  );
+  return onSnapshot(q, (snapshot) => {
+    const requests = snapshot.docs.map(
+      (d) =>
+        ({
+          id: d.id,
+          ...sanitizeData(d.data()),
+        }) as PairingRequest
+    );
+    callback(requests);
+  });
+};
+
+export const approvePairingRequest = async (parentId: string, request: PairingRequest) => {
+  if (!db || !parentId) return;
+
+  // 1. Create the actual child document
+  const childData: Partial<Child> = {
+    name: request.childName,
+    parentId: parentId,
+    status: 'online',
+  };
+  const newChild = await addChildToDB(parentId, childData);
+
+  // 2. Update the pairing request to APPROVED and link the child ID
+  const requestRef = doc(db, PARENTS_COLLECTION, parentId, PAIRING_REQUESTS_SUBCOLLECTION, request.id);
+  await updateDoc(requestRef, {
+    status: 'APPROVED',
+    childDocumentId: newChild.id,
+  });
+};
+
+export const rejectPairingRequest = async (parentId: string, requestId: string) => {
+  if (!db || !parentId) return;
+  const requestRef = doc(db, PARENTS_COLLECTION, parentId, PAIRING_REQUESTS_SUBCOLLECTION, requestId);
+  await updateDoc(requestRef, {
+    status: 'REJECTED',
+  });
 };

@@ -56,30 +56,54 @@ service cloud.firestore {
     /**
      * Parents Collection
      * - Parents: Full control over their profile
-     * - Others: No access
+     * - Anonymous devices: Read ONLY for pairing (looking up parentId via pairingKey)
      */
     match /parents/{parentId} {
-      allow read, update: if isParent(parentId);
-      allow create: if isAuthenticated() && request.auth.uid == parentId; // Registration
-      allow delete: if false; // Prevent accidental deletion
+      // الوالد له صلاحية كاملة
+      allow read: if isParent(parentId);
+      allow update: if isParent(parentId);
+      allow create: if isAuthenticated() && request.auth.uid == parentId;
+      allow delete: if false;
+
+      // Phase 4.8.2: Secure Pairing Approval sub-collection
+      match /pairingRequests/{requestId} {
+        // Create: Child device (anonymous) can create a request
+        allow create: if isAuthenticated() && 
+          request.resource.data.parentId == parentId &&
+          request.resource.data.status == 'PENDING';
+        
+        // Read: Parent OR the Child device that created the request (poll for status)
+        allow read: if isParent(parentId) || 
+          (isAuthenticated() && request.auth.uid == requestId);
+        
+        // Update: Parent (APROVE/REJECT)
+        allow update: if isParent(parentId);
+        
+        // Delete: Parent only
+        allow delete: if isParent(parentId);
+      }
+    }
+
+    // Phase 4.8.2: Robust Pairing lookup via Key document
+    match /pairingKeys/{key} {
+      // DEBUG: Allowing public read temporarily to isolate Auth issues
+      allow get: if true;
     }
 
     /**
      * Children Collection
      * - Parents/Supervisors: Read/Update
-     * - Child: Read ONLY their own config
+     * - Child: Read ONLY their own config, Create for initial pairing
      */
     match /children/{childId} {
       // Read: Parent, Supervisor, or the Child themselves
       allow read: if canManageFamily(resource.data.parentId) || isChild(childId);
 
-      // Create: Parent only
-      allow create: if isParent(request.resource.data.parentId) && isValidId(childId);
+      // Create: Parent or Anonymous child during pairing
+      allow create: if (isParent(request.resource.data.parentId) || isAuthenticated()) && isValidId(childId);
 
-      // Update: Parent or Supervisor (e.g., settings, limits)
-      // Child cannot update their own config (must be done via parent/supervisor)
-      allow update: if canManageFamily(resource.data.parentId) &&
-        request.resource.data.parentId == resource.data.parentId;
+      // Update: Parent or Supervisor
+      allow update: if canManageFamily(resource.data.parentId);
 
       // Delete: Parent only
       allow delete: if isParent(resource.data.parentId);

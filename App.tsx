@@ -8,6 +8,7 @@ import {
   Category,
   UserRole,
   CustomMode,
+  PairingRequest,
 } from './types';
 
 // استيراد المكونات من مساراتها الصحيحة داخل components/
@@ -39,6 +40,9 @@ import {
   subscribeToAlerts,
   logUserActivity,
   inviteSupervisor,
+  subscribeToPairingRequests,
+  approvePairingRequest,
+  rejectPairingRequest,
 } from './services/firestoreService';
 import { translations } from './translations';
 import { MY_DESIGNED_ASSETS, FALLBACK_ASSETS } from './assets';
@@ -124,6 +128,71 @@ const Sidebar: React.FC<{
   );
 };
 
+const PairingRequestModal: React.FC<{
+  requests: PairingRequest[];
+  onApprove: (request: PairingRequest) => void;
+  onReject: (requestId: string) => void;
+  lang: 'ar' | 'en';
+}> = ({ requests, onApprove, onReject, lang }) => {
+  if (requests.length === 0) return null;
+  const current = requests[0];
+  const t = lang === 'ar' ? {
+    title: 'طلب ربط جديد 🛡️',
+    desc: 'يرغب جهاز جديد في الانضمام إلى نظام الأمان الخاص بك.',
+    device: 'الجهاز:',
+    model: 'الموديل:',
+    approve: 'موافقة',
+    reject: 'رفض',
+  } : {
+    title: 'New Pairing Request 🛡️',
+    desc: 'A new device wants to join your security system.',
+    device: 'Device:',
+    model: 'Model:',
+    approve: 'Approve',
+    reject: 'Reject',
+  };
+
+  return (
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xl animate-in fade-in duration-500">
+      <div className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl p-8 border border-white/20 transform animate-in zoom-in duration-300">
+        <div className="flex flex-col items-center text-center">
+          <div className="w-20 h-20 bg-indigo-50 rounded-3xl flex items-center justify-center mb-6 scale-110 shadow-inner">
+            <ICONS.Devices className="w-10 h-10 text-indigo-600" />
+          </div>
+          <h2 className="text-2xl font-black text-slate-900 mb-2 brand-font">{t.title}</h2>
+          <p className="text-sm text-slate-500 font-bold mb-6">{t.desc}</p>
+
+          <div className="w-full bg-slate-50 rounded-2xl p-5 mb-8 text-right space-y-2 border border-slate-100 shadow-sm">
+            <div className="flex justify-between items-center text-sm">
+              <span className="font-black text-indigo-600"> {current.childName}</span>
+              <span className="text-slate-400 font-bold">{t.device}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span className="font-black text-slate-700">{current.model}</span>
+              <span className="text-slate-400 font-bold">{t.model}</span>
+            </div>
+          </div>
+
+          <div className="w-full flex gap-4">
+            <button
+              onClick={() => onApprove(current)}
+              className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all"
+            >
+              ✅ {t.approve}
+            </button>
+            <button
+              onClick={() => onReject(current.id)}
+              className="flex-1 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-red-50 hover:text-red-600 active:scale-95 transition-all"
+            >
+              ❌ {t.reject}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const navigate = useNavigate();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -145,6 +214,7 @@ const App: React.FC = () => {
   });
   const [children, setChildren] = useState<Child[]>([]);
   const [alerts, setAlerts] = useState<MonitoringAlert[]>([]);
+  const [pairingRequests, setPairingRequests] = useState<PairingRequest[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [modes, setModes] = useState<CustomMode[]>([
     {
@@ -282,12 +352,17 @@ const App: React.FC = () => {
       checkLoading();
     });
 
+    const unsubPairing = subscribeToPairingRequests(currentUser.id, (data) => {
+      setPairingRequests(data);
+    });
+
     // Safety fallback
     const safetyTimer = setTimeout(() => setIsLoadingData(false), 5000);
 
     return () => {
       unsubChildren();
       unsubAlerts();
+      unsubPairing();
       clearTimeout(safetyTimer);
     };
   }, [isAuthenticated, currentUser.id, alerts.length, currentUser.alertProtocol]);
@@ -512,6 +587,12 @@ const App: React.FC = () => {
       {activeToast && (
         <NotificationToast alert={activeToast} onClose={() => setActiveToast(null)} />
       )}
+      <PairingRequestModal
+        requests={pairingRequests}
+        lang={lang}
+        onApprove={(req) => approvePairingRequest(currentUser.id, req)}
+        onReject={(id) => rejectPairingRequest(currentUser.id, id)}
+      />
     </div>
   );
 };
