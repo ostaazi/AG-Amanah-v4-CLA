@@ -1,0 +1,85 @@
+/* Amanah Global Styles */
+
+body {
+  font-family: 'Cairo', sans-serif;
+  background-color: #f8fafc;
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.custom-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Premium Animations */
+@keyframes pulse-subtle {
+  0%,
+  100% {
+    transform: scale(1.15);
+    opacity: 0.95;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 3s ease-in-out infinite;
+}
+
+/* Breathing Glow Animation */
+@keyframes shield-breathing {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 15px rgba(209, 162, 61, 0.2))
+      drop-shadow(0 0 5px rgba(209, 162, 61, 0.1));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 35px rgba(209, 162, 61, 0.5))
+      drop-shadow(0 0 15px rgba(209, 162, 61, 0.3));
+    transform: scale(1.02);
+  }
+}
+
+.animate-shield-breathing {
+  animation: shield-breathing 4s ease-in-out infinite;
+}
+
+@keyframes loading-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+.animate-loading-slide {
+  animation: loading-slide 2s linear infinite;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

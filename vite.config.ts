@@ -39,6 +39,8 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: true,
+      assetsInlineLimit: 0, // Disable asset inlining
+      cssCodeSplit: false, // Disable CSS code splitting
     },
   };
 });
