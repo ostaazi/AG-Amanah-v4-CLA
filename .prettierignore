@@ -1,0 +1,31 @@
+# Build outputs
+dist
+dist-ssr
+coverage
+
+# Dependencies
+node_modules
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Lock files
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Generated files
+*.min.js
+*.min.css
+
+# Android
+android
+
+# Git
+.git
+
+# IDE
+.vscode
+.idea
