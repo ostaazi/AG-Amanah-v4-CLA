@@ -109,6 +109,17 @@ export interface ParentAccount extends FamilyMember {
   // Phase 4.1: Dynamic Pairing
   pairingKey?: string;
   pairingKeyExpiresAt?: Date | any; // Timestamp from Firestore
+
+  // Phase 4.2: Feature Toggles
+  enabledFeatures?: {
+    liveMonitor?: boolean;
+    evidenceVault?: boolean;
+    locationTracking?: boolean;
+    psychAnalysis?: boolean;
+    webFiltering?: boolean;
+    appBlocking?: boolean;
+    chatMonitoring?: boolean;
+  };
 }
 
 export interface ChatMessage {

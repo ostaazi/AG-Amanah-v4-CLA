@@ -434,95 +434,232 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </section>
 
-      {/* 3. قسم أمان الحساب */}
+      {/* 2.5 قسم تفعيل المميزات (Feature Toggles) */}
       <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl space-y-8">
         <div className="flex justify-between items-center border-b border-slate-50 pb-6">
-          <div className="text-right flex items-center gap-4">
-            <div
-              className="relative group cursor-pointer"
-              onClick={() =>
-                setPickerConfig({
-                  isOpen: true,
-                  targetId: currentUser.id,
-                  targetRole: 'ADMIN',
-                  currentUrl: currentUser.avatar,
-                })
-              }
-            >
-              <img
-                src={currentUser.avatar}
-                className="w-16 h-16 rounded-2xl object-cover border-2 border-slate-100 shadow-md"
-              />
-              <div className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <span className="text-white text-[8px] font-black">تغيير</span>
-              </div>
-            </div>
-            <div>
-              <h3 className="text-2xl font-black text-slate-800">{t.securityPrivacy}</h3>
-              <p className="text-slate-400 font-bold text-xs">إدارة حساب المدير والأمان.</p>
-            </div>
+          <div className="text-right">
+            <h3 className="text-2xl font-black text-slate-800">مميزات التطبيق</h3>
+            <p className="text-slate-400 font-bold text-xs">تفعيل أو تعطيل وظائف النظام الأساسية.</p>
           </div>
           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl shadow-inner">
-            🛡️
+            🚀
           </div>
         </div>
 
-        <div className="flex flex-col gap-6">
-          <div className="w-full">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Live Monitor */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[2rem]">
+            <div className="relative w-12 h-7 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={currentUser.enabledFeatures?.liveMonitor !== false}
+              onClick={() => onUpdateMember(currentUser.id, 'ADMIN', { [`enabledFeatures.liveMonitor`]: currentUser.enabledFeatures?.liveMonitor === false })}
+            >
+              <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.enabledFeatures?.liveMonitor !== false ? '-translate-x-5' : 'translate-x-0'}`} />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-black text-slate-700 text-xs text-right">المراقبة الحية</span>
+              <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center"><ICONS.LiveCamera className="w-4 h-4" /></div>
+            </div>
+          </div>
+
+          {/* Evidence Vault */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[2rem]">
+            <div className="relative w-12 h-7 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={currentUser.enabledFeatures?.evidenceVault !== false}
+              onClick={() => onUpdateMember(currentUser.id, 'ADMIN', { [`enabledFeatures.evidenceVault`]: currentUser.enabledFeatures?.evidenceVault === false })}
+            >
+              <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.enabledFeatures?.evidenceVault !== false ? '-translate-x-5' : 'translate-x-0'}`} />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-black text-slate-700 text-xs text-right">خزنة الأدلة</span>
+              <div className="w-8 h-8 bg-red-100 text-red-600 rounded-lg flex items-center justify-center"><ICONS.Vault className="w-4 h-4" /></div>
+            </div>
+          </div>
+
+          {/* Location Tracking */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[2rem]">
+            <div className="relative w-12 h-7 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={currentUser.enabledFeatures?.locationTracking !== false}
+              onClick={() => onUpdateMember(currentUser.id, 'ADMIN', { [`enabledFeatures.locationTracking`]: currentUser.enabledFeatures?.locationTracking === false })}
+            >
+              <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.enabledFeatures?.locationTracking !== false ? '-translate-x-5' : 'translate-x-0'}`} />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-black text-slate-700 text-xs text-right">تتبع الموقع</span>
+              <div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center"><ICONS.Location className="w-4 h-4" /></div>
+            </div>
+          </div>
+
+          {/* Psychological Analysis */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[2rem]">
+            <div className="relative w-12 h-7 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={currentUser.enabledFeatures?.psychAnalysis !== false}
+              onClick={() => onUpdateMember(currentUser.id, 'ADMIN', { [`enabledFeatures.psychAnalysis`]: currentUser.enabledFeatures?.psychAnalysis === false })}
+            >
+              <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.enabledFeatures?.psychAnalysis !== false ? '-translate-x-5' : 'translate-x-0'}`} />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-black text-slate-700 text-xs text-right">التحليل النفسي</span>
+              <div className="w-8 h-8 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center"><ICONS.Pulse className="w-4 h-4" /></div>
+            </div>
+          </div>
+
+          {/* Web Filtering */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[2rem]">
+            <div className="relative w-12 h-7 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={currentUser.enabledFeatures?.webFiltering !== false}
+              onClick={() => onUpdateMember(currentUser.id, 'ADMIN', { [`enabledFeatures.webFiltering`]: currentUser.enabledFeatures?.webFiltering === false })}
+            >
+              <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.enabledFeatures?.webFiltering !== false ? '-translate-x-5' : 'translate-x-0'}`} />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-black text-slate-700 text-xs text-right">فلترة الويب</span>
+              <div className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center"><ICONS.Globe className="w-4 h-4" /></div>
+            </div>
+          </div>
+
+          {/* App Blocking */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[2rem]">
+            <div className="relative w-12 h-7 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={currentUser.enabledFeatures?.appBlocking !== false}
+              onClick={() => onUpdateMember(currentUser.id, 'ADMIN', { [`enabledFeatures.appBlocking`]: currentUser.enabledFeatures?.appBlocking === false })}
+            >
+              <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.enabledFeatures?.appBlocking !== false ? '-translate-x-5' : 'translate-x-0'}`} />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-black text-slate-700 text-xs text-right">حظر التطبيقات</span>
+              <div className="w-8 h-8 bg-amber-100 text-amber-600 rounded-lg flex items-center justify-center"><ICONS.Apps className="w-4 h-4" /></div>
+            </div>
+          </div>
+
+          {/* Chat Monitoring */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[2rem]">
+            <div className="relative w-12 h-7 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={currentUser.enabledFeatures?.chatMonitoring !== false}
+              onClick={() => onUpdateMember(currentUser.id, 'ADMIN', { [`enabledFeatures.chatMonitoring`]: currentUser.enabledFeatures?.chatMonitoring === false })}
+            >
+              <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.enabledFeatures?.chatMonitoring !== false ? '-translate-x-5' : 'translate-x-0'}`} />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-black text-slate-700 text-xs text-right">مراقبة المحادثات</span>
+              <div className="w-8 h-8 bg-pink-100 text-pink-600 rounded-lg flex items-center justify-center"><ICONS.Chat className="w-4 h-4" /></div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* 3. قسم أمان الحساب (Redesigned) */}
+      <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl space-y-8">
+        <div className="flex justify-between items-center border-b border-slate-50 pb-6">
+          <div className="text-right">
+            <h3 className="text-2xl font-black text-slate-800 flex items-center gap-2 justify-end">
+              <span>{t.securityPrivacy}</span>
+              <span className="text-xl">🔐🔐</span>
+            </h3>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          {/* Push Notifications */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[2rem]">
+            <div className="relative w-14 h-8 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={currentUser.pushEnabled === true}
+              onClick={() => onUpdateMember(currentUser.id, 'ADMIN', { pushEnabled: !currentUser.pushEnabled })}
+            >
+              <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.pushEnabled ? '-translate-x-6' : 'translate-x-0'}`} />
+            </div>
+            <div className="text-right flex items-center gap-4">
+              <div>
+                <h4 className="font-black text-slate-800 text-sm">تنبيهات فورية (Push)</h4>
+                <p className="text-[10px] font-bold text-slate-400">استقبال تنبيهات التهديدات فورياً</p>
+              </div>
+              <div className="w-10 h-10 bg-yellow-100 text-yellow-600 rounded-xl flex items-center justify-center">
+                <ICONS.Bell className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Biometric */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[2rem]">
+            <div className="relative w-14 h-8 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={!!currentUser.biometricId}
+              onClick={() => onUpdateMember(currentUser.id, 'ADMIN', { biometricId: currentUser.biometricId ? null : 'bio_enabled' })}
+            >
+              <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.biometricId ? '-translate-x-6' : 'translate-x-0'}`} />
+            </div>
+            <div className="text-right flex items-center gap-4">
+              <div>
+                <h4 className="font-black text-slate-800 text-sm">البصمة البيومترية</h4>
+                <p className="text-[10px] font-bold text-slate-400">الدخول بالبصمة أو الوجه</p>
+              </div>
+              <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center">
+                <ICONS.Fingerprint className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* 2FA */}
+          <div className="flex items-center justify-between p-4 bg-indigo-50/50 border border-indigo-100 rounded-[2rem]">
+            <div className="relative w-14 h-8 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={!!currentUser.twoFASecret}
+              onClick={() => {
+                if (currentUser.twoFASecret) {
+                  // Disable logic
+                  if (window.confirm('هل تريد تعطيل المصادقة الثنائية؟')) {
+                    onUpdateMember(currentUser.id, 'ADMIN', { twoFASecret: null });
+                  }
+                } else {
+                  handleStart2FA();
+                }
+              }}
+            >
+              <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.twoFASecret ? '-translate-x-6' : 'translate-x-0'}`} />
+            </div>
+            <div className="text-right flex items-center gap-4">
+              <div>
+                <h4 className="font-black text-slate-800 text-sm">المصادقة الثنائية (TOTP)</h4>
+                <p className="text-[10px] font-bold text-slate-400">الربط مع Google Authenticator</p>
+              </div>
+              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center">
+                <ICONS.Shield className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Change Password (Preserved at bottom) */}
+          <div className="w-full pt-4 border-t border-slate-100">
             <button
               onClick={() => setShowPassForm(!showPassForm)}
-              className="w-full p-6 bg-slate-50 rounded-[2rem] flex items-center justify-between hover:bg-slate-100 transition-all"
+              className="w-full p-4 bg-white border border-slate-200 rounded-[1.5rem] flex items-center justify-between hover:bg-slate-50 transition-all group"
             >
-              <div className="flex items-center gap-4">
-                <span className="text-xl">🔑</span>
-                <span className="font-black text-slate-700 text-sm">{t.changePass}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-lg grayscale group-hover:grayscale-0 transition-all">🔑</span>
+                <span className="font-black text-slate-600 text-xs">{t.changePass}</span>
               </div>
               <span
-                className={`transform transition-transform ${showPassForm ? 'rotate-180' : ''}`}
+                className={`transform transition-transform text-slate-400 ${showPassForm ? 'rotate-180' : ''}`}
               >
                 ▼
               </span>
             </button>
 
             {showPassForm && (
-              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-4 mt-2 animate-in slide-in-from-top-4">
+              <div className="p-4 bg-slate-50 rounded-[1.5rem] border border-slate-100 space-y-3 mt-2 animate-in slide-in-from-top-2">
                 <input
                   type="password"
                   placeholder={t.currentPass}
-                  className="w-full p-4 bg-white border border-slate-200 rounded-xl outline-none text-xs text-right"
+                  className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-xs text-right font-bold"
                 />
                 <input
                   type="password"
                   placeholder={t.newPass}
-                  className="w-full p-4 bg-white border border-slate-200 rounded-xl outline-none text-xs text-right"
+                  className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-xs text-right font-bold"
                 />
-                <button className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-xs">
+                <button className="w-full py-3 bg-slate-900 text-white rounded-xl font-black text-xs hover:bg-slate-800 transition-colors">
                   {t.saveChanges}
                 </button>
               </div>
             )}
-          </div>
-
-          <div
-            className={`w-full p-6 rounded-[2rem] flex items-center justify-between border-2 transition-all ${currentUser.twoFASecret ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-transparent'}`}
-          >
-            <div className="flex items-center gap-4 text-right">
-              <span className="text-xl">📱</span>
-              <div>
-                <span className="font-black text-slate-700 text-sm block">{t.twoFA}</span>
-                <span
-                  className={`text-[9px] font-bold ${currentUser.twoFASecret ? 'text-emerald-600' : 'text-slate-400'}`}
-                >
-                  {currentUser.twoFASecret ? 'حسابك محمي الآن' : 'غير مفعل'}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={handleStart2FA}
-              className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-[10px] font-black shadow-md active:scale-95"
-            >
-              {currentUser.twoFASecret ? 'تحديث' : t.setup2FA}
-            </button>
           </div>
         </div>
       </section>
