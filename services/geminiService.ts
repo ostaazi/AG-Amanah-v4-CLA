@@ -87,7 +87,7 @@ const runLocalStaticAudit = (files: {path: string, content: string}[]): SystemAu
 };
 
 export const runFullSystemAudit = async (files: {path: string, content: string}[]): Promise<SystemAuditReport | null> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
   const filesContext = files.map(f => `FILE: ${f.path}\nCONTENT:\n${f.content}`).join('\n---\n');
 
   try {
@@ -144,7 +144,7 @@ export const runFullSystemAudit = async (files: {path: string, content: string}[
 };
 
 export const auditCodeSecurity = async (code: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-pro-preview",
@@ -187,7 +187,7 @@ export const auditCodeSecurity = async (code: string) => {
 };
 
 export const analyzeLocationSafety = async (lat: number, lng: number) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
   try {
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: "gemini-2.5-flash", 
@@ -218,7 +218,7 @@ export const analyzeContent = async (
   imageUri?: string
 ): Promise<Partial<MonitoringAlert & { conversationLog: ChatMessage[], suspectUsername: string }>> => {
   const TIMEOUT_MS = 10000; 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
   const parts: any[] = [
     { 
       text: `CRITICAL SAFETY GUARD:
