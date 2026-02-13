@@ -5,10 +5,11 @@
  */
 
 // Mock crypto for Node.js environment
+// @ts-ignore - Mocking crypto for tests (signature mismatch with strict null checks)
 if (!globalThis.crypto) {
-  // @ts-expect-error - Mocking crypto for tests
   globalThis.crypto = {
-    getRandomValues: <T extends ArrayBufferView>(array: T): T => {
+    getRandomValues: <T extends ArrayBufferView | null>(array: T): T => {
+      if (!array) return array;
       // Simple mock: fill with pseudo-random bytes
       const bytes = new Uint8Array(array.buffer);
       for (let i = 0; i < bytes.length; i++) {
@@ -23,12 +24,13 @@ if (!globalThis.crypto) {
       decrypt: () =>
         Promise.resolve(new TextEncoder().encode('decrypted').buffer),
       sign: () => Promise.resolve(new ArrayBuffer(20)),
-    } as SubtleCrypto,
+    } as unknown as SubtleCrypto,
+    randomUUID: () => '00000000-0000-0000-0000-000000000000',
   };
 }
 
 // Mock window.crypto if needed
 if (typeof window !== 'undefined' && !window.crypto) {
-  // @ts-expect-error - Mocking window.crypto for tests
-  window.crypto = globalThis.crypto;
+  // Mocking window.crypto for tests
+  window.crypto = globalThis.crypto as unknown as Crypto;
 }

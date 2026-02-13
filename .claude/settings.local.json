@@ -5,7 +5,10 @@
       "Bash(git commit:*)",
       "Bash(git tag:*)",
       "Bash(npm run format:*)",
-      "Bash(npm run lint)"
+      "Bash(npm run lint)",
+      "Bash(npx vitest:*)",
+      "Bash(npm run test:run:*)",
+      "Bash(npm run type-check:*)"
     ]
   }
 }

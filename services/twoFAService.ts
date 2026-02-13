@@ -231,7 +231,7 @@ export async function verify2FACode(
 
     // Decrypt all backup codes
     const backupCodes = await Promise.all(
-      backupCodesEncrypted.map((encrypted) => decryptData(encrypted, password))
+      backupCodesEncrypted.map((encrypted: string) => decryptData(encrypted, password))
     );
 
     // Find matching backup code

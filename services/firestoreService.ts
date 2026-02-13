@@ -24,6 +24,7 @@ import {
   ActivityLog,
   UserRole,
 } from '../types';
+import { ValidationService } from './validationService';
 
 const CHILDREN_COLLECTION = 'children';
 const PARENTS_COLLECTION = 'parents';
@@ -44,8 +45,8 @@ const validateDocumentId = (id: string, fieldName: string = 'ID'): void => {
   if (!validIdPattern.test(id)) {
     throw new Error(
       `Invalid ${fieldName} format. ` +
-        `Only alphanumeric characters, hyphens, and underscores are allowed. ` +
-        `Attempted value: ${id.substring(0, 50)}`
+      `Only alphanumeric characters, hyphens, and underscores are allowed. ` +
+      `Attempted value: ${id.substring(0, 50)}`
     );
   }
   // Prevent path traversal attempts
@@ -97,6 +98,13 @@ export const sendRemoteCommand = async (childId: string, command: string, value:
   // Validate childId to prevent path traversal and command injection
   validateDocumentId(childId, 'childId');
 
+  // Phase 3.2: Validate command payload
+  const validation = ValidationService.validateCommand(command, value);
+  if (!validation.valid) {
+    console.error(`Command Validation Failed: ${validation.error}`);
+    throw new Error(validation.error);
+  }
+
   const childRef = doc(db, CHILDREN_COLLECTION, childId);
   await updateDoc(childRef, {
     [`commands.${command}`]: {
@@ -107,11 +115,20 @@ export const sendRemoteCommand = async (childId: string, command: string, value:
   });
 };
 
-export const updatePairingKeyInDB = async (parentId: string, key: string) => {
-  if (!db || !parentId) return;
+export const rotatePairingKey = async (parentId: string): Promise<string> => {
+  if (!db || !parentId) throw new Error('Database not initialized or invalid parentId');
+
+  // Generate 6-digit random code
+  const newKey = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Timestamp.fromMillis(Date.now() + 10 * 60 * 1000); // 10 minutes
+
   const parentRef = doc(db, PARENTS_COLLECTION, parentId);
-  const safeKey = (key || '').toString().replace('-', '');
-  await setDoc(parentRef, { pairingKey: safeKey }, { merge: true });
+  await updateDoc(parentRef, {
+    pairingKey: newKey,
+    pairingKeyExpiresAt: expiresAt,
+  });
+
+  return newKey;
 };
 
 export const saveAlertToDB = async (
@@ -119,6 +136,14 @@ export const saveAlertToDB = async (
   alert: Partial<MonitoringAlert | EvidenceRecord>
 ) => {
   if (!db) return;
+
+  // Phase 3.2: Validate alert data
+  const validation = ValidationService.validateAlert(alert);
+  if (!validation.valid) {
+    console.warn(`Alert Validation Failed: ${validation.error}`);
+    return; // Drop invalid alerts silently or throw
+  }
+
   try {
     const payload = {
       ...alert,
@@ -137,7 +162,7 @@ export const subscribeToAlerts = (
   parentId: string,
   callback: (alerts: MonitoringAlert[]) => void
 ) => {
-  if (!db || !parentId) return () => {};
+  if (!db || !parentId) return () => { };
   // جلب أحدث 100 تنبيه مرتبة زمنياً
   const q = query(
     collection(db, ALERTS_COLLECTION),
@@ -146,7 +171,9 @@ export const subscribeToAlerts = (
     limit(100)
   );
 
-  return onSnapshot(
+  let unsubscribe: () => void = () => { };
+
+  unsubscribe = onSnapshot(
     q,
     (snapshot) => {
       const alerts = snapshot.docs.map((d) => {
@@ -154,7 +181,6 @@ export const subscribeToAlerts = (
         return {
           id: d.id,
           ...sanitizeData(rawData),
-          // ضمان وجود التاريخ ككائن Date للعرض
           timestamp: rawData.timestamp?.toDate() || new Date(),
         } as MonitoringAlert;
       });
@@ -162,9 +188,9 @@ export const subscribeToAlerts = (
     },
     (err) => {
       console.warn('Firestore Alerts Error (Check Indexes):', err);
-      // Fallback في حال فشل الـ index المركب (where + orderBy)
+      // Fallback: Use simple query (no orderBy) and sort in client
       const simpleQ = query(collection(db, ALERTS_COLLECTION), where('parentId', '==', parentId));
-      onSnapshot(simpleQ, (snap) => {
+      unsubscribe = onSnapshot(simpleQ, (snap) => {
         const fallbackAlerts = snap.docs
           .map((d) => ({ id: d.id, ...sanitizeData(d.data()) }) as any)
           .sort(
@@ -174,10 +200,12 @@ export const subscribeToAlerts = (
       });
     }
   );
+
+  return () => unsubscribe();
 };
 
 export const subscribeToChildren = (parentId: string, callback: (children: Child[]) => void) => {
-  if (!db || !parentId) return () => {};
+  if (!db || !parentId) return () => { };
   const q = query(collection(db, CHILDREN_COLLECTION), where('parentId', '==', parentId));
   return onSnapshot(q, (snapshot) => {
     const children = snapshot.docs.map(
@@ -194,7 +222,7 @@ export const subscribeToChildren = (parentId: string, callback: (children: Child
 export const addChildToDB = async (parentId: string, childData: Partial<Child>): Promise<Child> => {
   if (!db) throw new Error('Database not initialized');
   const payload = {
-    ...childData,
+    ...ValidationService.sanitizeInput(childData),
     parentId,
     status: 'online',
     createdAt: Timestamp.now(),
@@ -236,14 +264,16 @@ export const subscribeToActivities = (
   parentId: string,
   callback: (data: ActivityLog[]) => void
 ) => {
-  if (!db || !parentId) return () => {};
+  if (!db || !parentId) return () => { };
   const q = query(
     collection(db, ACTIVITIES_COLLECTION),
     where('parentId', '==', parentId),
     orderBy('timestamp', 'desc'),
     limit(50)
   );
-  return onSnapshot(
+  let unsubscribe: () => void = () => { };
+
+  unsubscribe = onSnapshot(
     q,
     (snapshot) => {
       const activities = snapshot.docs.map(
@@ -255,13 +285,14 @@ export const subscribeToActivities = (
       );
       callback(activities);
     },
-    () => {
+    (err) => {
+      console.warn('Activities Listener Error (Check Indexes):', err);
       // Fallback if index not ready
       const simpleQ = query(
         collection(db, ACTIVITIES_COLLECTION),
         where('parentId', '==', parentId)
       );
-      onSnapshot(simpleQ, (snap) => {
+      unsubscribe = onSnapshot(simpleQ, (snap) => {
         const fallback = snap.docs
           .map((d) => ({ id: d.id, ...sanitizeData(d.data()) }) as any)
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -269,6 +300,8 @@ export const subscribeToActivities = (
       });
     }
   );
+
+  return () => unsubscribe();
 };
 
 export const fetchSupervisors = async (parentId: string): Promise<FamilyMember[]> => {
@@ -307,7 +340,7 @@ export const logUserActivity = async (
 ): Promise<void> => {
   if (!db || !parentId) return;
   await addDoc(collection(db, ACTIVITIES_COLLECTION), {
-    ...activity,
+    ...ValidationService.sanitizeInput(activity),
     parentId,
     timestamp: Timestamp.now(),
   });

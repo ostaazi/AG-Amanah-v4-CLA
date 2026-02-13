@@ -2,10 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ICONS, AdminShieldBadge, AmanahShield } from '../constants';
 import { ParentAccount, Child, FamilyMember, UserRole, AlertProtocolMode } from '../types';
 import { translations } from '../translations';
-import { fetchSupervisors, updateMemberInDB, logUserActivity } from '../services/firestoreService';
+import { fetchSupervisors, updateMemberInDB, logUserActivity, rotatePairingKey } from '../services/firestoreService';
 import { clearAllUserData } from '../services/mockDataService';
 import { generate2FASecret, getQRCodeUrl, verifyTOTP } from '../services/twoFAService';
 import AvatarPickerModal from './AvatarPickerModal';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface SettingsViewProps {
   currentUser: ParentAccount;
@@ -64,14 +65,70 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     loadSupervisors();
   }, [currentUser.id]);
 
-  const pairingKey = useMemo(() => {
-    const id = currentUser?.id || '';
-    const raw = id.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-    if (raw.length < 4) return '----';
-    const part1 = raw.substring(0, 4);
-    const part2 = raw.substring(Math.max(0, raw.length - 4));
-    return `${part1}-${part2}`;
-  }, [currentUser?.id]);
+  // Phase 4.1: Dynamic Pairing Auto-Rotation
+  useEffect(() => {
+    const checkRotation = async () => {
+      // Safety check for guest mode
+      if (currentUser.id === 'guest') return;
+
+      const now = new Date();
+      let expires: Date | null = null;
+
+      if (currentUser.pairingKeyExpiresAt) {
+        expires =
+          typeof currentUser.pairingKeyExpiresAt.toDate === 'function'
+            ? currentUser.pairingKeyExpiresAt.toDate()
+            : new Date(currentUser.pairingKeyExpiresAt);
+      }
+
+      // If no key or expired, rotate
+      if (!currentUser.pairingKey || !expires || now > expires) {
+        console.log('Pairing key expired or missing, rotating...');
+        try {
+          const newKey = await rotatePairingKey(currentUser.id);
+          // Update local state is handled by Firestore subscription in App.tsx usually, 
+          // but here we might rely on the parent updating props. 
+          // Since rotatePairingKey updates DB, and App.tsx syncs profile, it should reflect.
+          // However, syncParentProfile in App.tsx might not be real-time for *own* profile changes unless we manually trigger it.
+          // For now, we assume App.tsx will pick it up or we manually update if needed.
+          // Actually, App.tsx has handleUpdateMember but that's for explicit UI actions.
+          // To ensure UI updates, we might need to call onUpdateMember with the new key if we had the key returned.
+          // But rotatePairingKey does the DB write.
+          // Let's manually trigger a local update to ensure responsiveness if needed, 
+          // but strictly we should rely on data flow. 
+          // For this specific flow, let's trust the prop update cycle or force it via onUpdateMember (hacky).
+          // Better: just call rotatePairingKey and assume the parent component refetches or we force a reload.
+          // Actually, standard pattern:
+          await onUpdateMember(currentUser.id, 'ADMIN', {
+            pairingKey: newKey,
+            pairingKeyExpiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+          });
+        } catch (e) {
+          console.error('Failed to rotate pairing key', e);
+        }
+      }
+    };
+
+    checkRotation();
+    const interval = setInterval(checkRotation, 60 * 1000); // Check every minute
+    return () => clearInterval(interval);
+  }, [currentUser.id, currentUser.pairingKey, currentUser.pairingKeyExpiresAt, onUpdateMember]);
+
+  const handleRegenerateKey = async () => {
+    setIsProcessing(true);
+    try {
+      const newKey = await rotatePairingKey(currentUser.id);
+      await onUpdateMember(currentUser.id, 'ADMIN', {
+        pairingKey: newKey,
+        pairingKeyExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      });
+      showSuccessToast('تم تحديث مفتاح الربط');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const updateProtocol = async (mode: AlertProtocolMode) => {
     await onUpdateMember(currentUser.id, 'ADMIN', { alertProtocol: mode });
@@ -578,7 +635,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </section>
 
-      {/* 5. مفتاح الربط */}
+      {/* 5. مفتاح الربط (Dynamic & QR) */}
       <section className="bg-slate-900 rounded-[3rem] p-8 text-white shadow-2xl relative overflow-hidden">
         <div className="relative z-10 flex flex-col items-center text-center gap-6">
           <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center text-3xl">
@@ -586,17 +643,47 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
           <div>
             <h3 className="text-2xl font-black text-[#D1A23D]">مفتاح الربط</h3>
-            <p className="text-slate-400 font-bold text-xs mt-1">أدخل الرمز في تطبيق الطفل.</p>
+            <p className="text-slate-400 font-bold text-xs mt-1">امسح الرمز أو أدخل الكود لربط جهاز الطفل.</p>
           </div>
+
+          <div className="bg-white p-4 rounded-3xl shadow-lg">
+            <QRCodeSVG
+              value={JSON.stringify({
+                type: 'AMANAH_PAIRING',
+                key: currentUser.pairingKey,
+                pid: currentUser.id
+              })}
+              size={180}
+              level="H"
+              includeMargin={true}
+            />
+          </div>
+
           <div className="bg-black/40 p-6 rounded-2xl border border-white/10 flex items-center gap-6">
-            <code className="text-4xl font-mono font-black tracking-widest">{pairingKey}</code>
+            <code className="text-4xl font-mono font-black tracking-widest text-[#D1A23D]">{currentUser.pairingKey || '....'}</code>
             <button
-              onClick={() => navigator.clipboard.writeText(pairingKey.replace('-', ''))}
+              onClick={handleRegenerateKey}
+              disabled={isProcessing}
+              className="p-3 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-all hover:rotate-180 duration-500"
+              title="تحديث المفتاح"
+            >
+              <ICONS.Refresh className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => {
+                if (currentUser.pairingKey) {
+                  navigator.clipboard.writeText(currentUser.pairingKey);
+                  showSuccessToast('تم النسخ!');
+                }
+              }}
               className="p-3 bg-white/5 rounded-xl text-[#D1A23D]"
             >
               <ICONS.Rocket className="w-6 h-6" />
             </button>
           </div>
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest animate-pulse">
+            يتم تحديث الكود تلقائياً كل 10 دقائق
+          </p>
         </div>
       </section>
 

@@ -17,3 +17,12 @@ View your app in AI Studio: https://ai.studio/apps/drive/1NvomZsaYRa0-oeAOMSO2Ax
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+### Troubleshooting
+
+**If Build Fails on Windows (esbuild version mismatch):**
+If `npm run build` fails with "Host version ... does not match binary version", this is due to a known issue with esbuild on Windows after dependency updates.
+To fix:
+1. Delete `node_modules` folder and `package-lock.json`.
+2. Run `npm install` again to cleanly reinstall dependencies.
+3. Run `npm run build`.

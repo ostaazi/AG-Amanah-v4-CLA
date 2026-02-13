@@ -105,6 +105,10 @@ export interface ParentAccount extends FamilyMember {
   encryptionSalt?: string; // Base64-encoded random salt for PBKDF2
   encryptionIterations?: number; // PBKDF2 iterations (default: 100000)
   encryptionMigrated?: boolean; // Flag: true if migrated from legacy shared key
+
+  // Phase 4.1: Dynamic Pairing
+  pairingKey?: string;
+  pairingKeyExpiresAt?: Date | any; // Timestamp from Firestore
 }
 
 export interface ChatMessage {

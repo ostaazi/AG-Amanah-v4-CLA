@@ -2,8 +2,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HashRouter as Router } from 'react-router-dom';
 import App from './App';
-import './src/styles.css';
-import './animations.css';
+import './src/index.css';
+
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

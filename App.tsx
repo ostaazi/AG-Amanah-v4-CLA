@@ -26,6 +26,7 @@ import SystemStatusBar from './components/SystemStatusBar';
 import NotificationToast from './components/NotificationToast';
 import EmergencyOverlay from './components/EmergencyOverlay';
 import AuthView from './components/AuthView';
+import { ProtectedRoute } from './components/ProtectedRoute';
 
 import { ICONS, AmanahLogo, AdminShieldBadge, AmanahGlobalDefs, AmanahShield } from './constants';
 import { subscribeToAuthChanges, logoutUser } from './services/authService';
@@ -38,7 +39,6 @@ import {
   subscribeToAlerts,
   logUserActivity,
   inviteSupervisor,
-  updatePairingKeyInDB,
 } from './services/firestoreService';
 import { translations } from './translations';
 import { MY_DESIGNED_ASSETS, FALLBACK_ASSETS } from './assets';
@@ -233,12 +233,6 @@ const App: React.FC = () => {
               (profile.emergencyOverlayEnabled === false ? 'SIMPLE' : 'FULL'),
           });
           setIsAuthenticated(true);
-          const uid = user.uid || '';
-          const raw = uid.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-          if (raw.length >= 4) {
-            const key = raw.substring(0, 4) + '-' + raw.substring(Math.max(0, raw.length - 4));
-            await updatePairingKeyInDB(user.uid, key);
-          }
         } catch (e) {
           console.error(e);
         }
@@ -330,7 +324,7 @@ const App: React.FC = () => {
       </div>
     );
 
-  if (!isAuthenticated) return <AuthView onLoginSuccess={() => {}} />;
+  if (!isAuthenticated) return <AuthView onLoginSuccess={() => { }} />;
 
   return (
     <div
@@ -411,7 +405,7 @@ const App: React.FC = () => {
                   children={children}
                   lang={lang}
                   onUpdateDevice={(id, u) => handleUpdateMember(id, 'CHILD', u)}
-                  onToggleAppBlock={() => {}}
+                  onToggleAppBlock={() => { }}
                 />
               }
             />
@@ -426,7 +420,7 @@ const App: React.FC = () => {
                   modes={modes}
                   children={children}
                   onUpdateModes={setModes}
-                  onApplyMode={(c, m) => {}}
+                  onApplyMode={(c, m) => { }}
                 />
               }
             />
@@ -434,17 +428,26 @@ const App: React.FC = () => {
               path="/simulator"
               element={<SimulatorView children={children} parentId={currentUser.id} lang={lang} />}
             />
-            <Route path="/devlab" element={<DevLabView />} />
+            <Route
+              path="/devlab"
+              element={
+                <ProtectedRoute userRole={currentUser.role} allowedRoles={['ADMIN']}>
+                  <DevLabView />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/live" element={<LiveMonitorView children={children} lang={lang} />} />
             <Route
               path="/vault"
               element={
-                <EvidenceVaultView
-                  records={alerts as any}
-                  currentUser={currentUser}
-                  onRequestToast={(a) => setActiveToast(a)}
-                  isLoading={isLoadingData}
-                />
+                <ProtectedRoute userRole={currentUser.role} allowedRoles={['ADMIN', 'SUPERVISOR']}>
+                  <EvidenceVaultView
+                    records={alerts as any}
+                    currentUser={currentUser}
+                    onRequestToast={(a) => setActiveToast(a)}
+                    isLoading={isLoadingData}
+                  />
+                </ProtectedRoute>
               }
             />
             <Route
@@ -453,7 +456,7 @@ const App: React.FC = () => {
                 <PsychologicalInsightView
                   theme="light"
                   child={children[0]}
-                  onAcceptPlan={() => {}}
+                  onAcceptPlan={() => { }}
                 />
               }
             />
@@ -461,27 +464,31 @@ const App: React.FC = () => {
             <Route
               path="/settings"
               element={
-                <SettingsView
-                  currentUser={currentUser}
-                  children={children}
-                  lang={lang}
-                  onUpdateMember={handleUpdateMember}
-                  onDeleteMember={(id, role) => deleteMemberFromDB(id, role)}
-                  onAddChild={(data) => addChildToDB(currentUser.id, data)}
-                  onAddSupervisor={(data) => inviteSupervisor(currentUser.id, data)}
-                  showSuccessToast={(m) =>
-                    setActiveToast({
-                      id: 'sys-' + Date.now(),
-                      childName: 'System',
-                      platform: 'Amanah',
-                      content: m,
-                      category: Category.SAFE,
-                      severity: AlertSeverity.LOW,
-                      timestamp: new Date(),
-                      aiAnalysis: m,
-                    })
-                  }
-                />
+                <ProtectedRoute userRole={currentUser.role} allowedRoles={['ADMIN']}>
+                  <SettingsView
+                    currentUser={currentUser}
+                    children={children}
+                    lang={lang}
+                    onUpdateMember={handleUpdateMember}
+                    onDeleteMember={(id, role) => deleteMemberFromDB(id, role)}
+                    onAddChild={async (data) => {
+                      await addChildToDB(currentUser.id, data);
+                    }}
+                    onAddSupervisor={(data) => inviteSupervisor(currentUser.id, data)}
+                    showSuccessToast={(m) =>
+                      setActiveToast({
+                        id: 'sys-' + Date.now(),
+                        childName: 'System',
+                        platform: 'Amanah',
+                        content: m,
+                        category: Category.SAFE,
+                        severity: AlertSeverity.LOW,
+                        timestamp: new Date(),
+                        aiAnalysis: m,
+                      })
+                    }
+                  />
+                </ProtectedRoute>
               }
             />
           </Routes>
