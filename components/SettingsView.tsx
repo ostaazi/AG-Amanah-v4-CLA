@@ -827,7 +827,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           {children.map((child) => (
             <div
               key={child.id}
-              className="bg-white p-6 rounded-[2.5rem] border border-slate-100 flex items-center justify-between shadow-sm border-r-8 border-emerald-500"
+              className="bg-white p-6 rounded-[2.5rem] border border-slate-100 flex items-center justify-between shadow-sm border-r-8 border-r-emerald-500"
             >
               <div className="flex items-center gap-5">
                 <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center text-3xl shadow-inner">

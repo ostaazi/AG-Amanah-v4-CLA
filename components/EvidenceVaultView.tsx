@@ -151,56 +151,56 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pt-4 px-2 animate-in">
         {isLoading
           ? [1, 2, 3, 4, 5, 6].map((i) => (
-              <div
-                key={i}
-                className="bg-white rounded-[3rem] border border-slate-100 shadow-lg p-8 space-y-6"
-              >
-                <div className="flex justify-between">
-                  <Skeleton className="w-16 h-6 rounded-xl" />
-                  <Skeleton variant="text" className="w-20" />
+            <div
+              key={i}
+              className="bg-white rounded-[3rem] border border-slate-100 shadow-lg p-8 space-y-6"
+            >
+              <div className="flex justify-between">
+                <Skeleton className="w-16 h-6 rounded-xl" />
+                <Skeleton variant="text" className="w-20" />
+              </div>
+              <div className="flex items-center gap-5">
+                <Skeleton variant="circle" className="w-14 h-14" />
+                <div className="flex-1 space-y-3">
+                  <Skeleton variant="text" className="w-full h-6" />
+                  <Skeleton variant="text" className="w-2/3 h-4" />
+                </div>
+              </div>
+            </div>
+          ))
+          : filteredRecords.map((record) => (
+            <div
+              key={record.id}
+              onClick={() => setSelectedRecord(record)}
+              className={`bg-white rounded-[3rem] border shadow-lg p-8 cursor-pointer hover:border-indigo-600 transition-all duration-300 hover:scale-[1.02] group ${selectedRecord?.id === record.id ? 'border-indigo-600 ring-4 ring-indigo-50 shadow-2xl' : 'border-slate-100'}`}
+            >
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <span
+                    className={`px-4 py-1.5 rounded-xl text-[10px] font-black tracking-widest uppercase ${record.severity === AlertSeverity.CRITICAL ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'}`}
+                  >
+                    {record.severity}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-300 font-black">
+                    ID: {record.id.substring(0, 8)}
+                  </span>
                 </div>
                 <div className="flex items-center gap-5">
-                  <Skeleton variant="circle" className="w-14 h-14" />
-                  <div className="flex-1 space-y-3">
-                    <Skeleton variant="text" className="w-full h-6" />
-                    <Skeleton variant="text" className="w-2/3 h-4" />
+                  <div className="w-14 h-14 bg-slate-50 rounded-[1.2rem] flex items-center justify-center text-3xl shadow-inner border border-slate-100">
+                    👤
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-slate-900 font-mono tracking-tighter">
+                      @{(record.suspectUsername || '').replace('@', '')}
+                    </h3>
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                      {record.platform} • {record.childName}
+                    </p>
                   </div>
                 </div>
               </div>
-            ))
-          : filteredRecords.map((record) => (
-              <div
-                key={record.id}
-                onClick={() => setSelectedRecord(record)}
-                className={`bg-white rounded-[3rem] border shadow-lg p-8 cursor-pointer hover:border-indigo-600 transition-all duration-300 hover:scale-[1.02] group ${selectedRecord?.id === record.id ? 'border-indigo-600 ring-4 ring-indigo-50 shadow-2xl' : 'border-slate-100'}`}
-              >
-                <div className="space-y-6">
-                  <div className="flex justify-between items-center">
-                    <span
-                      className={`px-4 py-1.5 rounded-xl text-[10px] font-black tracking-widest uppercase ${record.severity === AlertSeverity.CRITICAL ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'}`}
-                    >
-                      {record.severity}
-                    </span>
-                    <span className="text-[10px] font-mono text-slate-300 font-black">
-                      ID: {record.id.substring(0, 8)}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-5">
-                    <div className="w-14 h-14 bg-slate-50 rounded-[1.2rem] flex items-center justify-center text-3xl shadow-inner border border-slate-100">
-                      👤
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-black text-slate-900 font-mono tracking-tighter">
-                        @{(record.suspectUsername || '').replace('@', '')}
-                      </h3>
-                      <p className="text-xs font-black text-slate-400 uppercase tracking-widest">
-                        {record.platform} • {record.childName}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
+            </div>
+          ))}
       </div>
 
       {selectedRecord && (
@@ -297,7 +297,7 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
                 {displayLog.map((msg, idx) => (
                   <div
                     key={idx}
-                    className="relative bg-white border border-slate-100 shadow-sm rounded-[2.5rem] p-8 flex flex-col w-full group transition-all hover:shadow-md border-b-4 border-slate-50"
+                    className="relative bg-white border border-slate-100 shadow-sm rounded-[2.5rem] p-8 flex flex-col w-full group transition-all hover:shadow-md border-b-4 border-b-slate-50"
                   >
                     <div className="flex items-center justify-between mb-4 border-b border-slate-50 pb-2">
                       <span
