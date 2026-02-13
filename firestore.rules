@@ -1,27 +1,189 @@
-
 rules_version = '2';
+
+/**
+ * Amanah Parental Control - Firestore Security Rules
+ * ===================================================
+ *
+ * Security Model (Phase 1.3):
+ * - Deny-by-default policy
+ * - Tenant isolation: parents can only access their own data
+ * - Immutable audit logs (append-only)
+ * - Prevent parentId tampering
+ * - Validate childId format (prevent path traversal)
+ * - Role-based access for supervisors
+ *
+ * Fixed Vulnerabilities:
+ * 1. Cross-tenant child creation (resource == null allowed any parentId)
+ * 2. Cross-tenant alert injection (no parentId validation on create)
+ * 3. No role-based access control
+ */
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // قواعد حماية ملفات الآباء (المدراء)
+
+    /**
+     * Helper Functions
+     */
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(parentId) {
+      return isAuthenticated() && request.auth.uid == parentId;
+    }
+
+    function isSupervisor(parentId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/supervisors/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/supervisors/$(request.auth.uid)).data.parentId == parentId;
+    }
+
+    function canAccess(parentId) {
+      return isOwner(parentId) || isSupervisor(parentId);
+    }
+
+    function isValidEmail(email) {
+      return email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+
+    function isValidId(id) {
+      // Prevent path traversal attacks: only alphanumeric, hyphens, underscores
+      return id.matches('^[a-zA-Z0-9_-]{1,128}$');
+    }
+
+    /**
+     * Parents Collection
+     * Users can only read/write their own profile
+     */
     match /parents/{parentId} {
-      allow read, write: if request.auth != null && request.auth.uid == parentId;
+      allow read, update: if isOwner(parentId);
+
+      // Allow create only during registration (Firebase Auth enforces this)
+      allow create: if isAuthenticated() &&
+        request.auth.uid == parentId &&
+        request.resource.data.email == request.auth.token.email &&
+        isValidEmail(request.resource.data.email);
+
+      // Prevent deletion (use soft delete via status field instead)
+      allow delete: if false;
     }
-    
-    // قواعد حماية بيانات الأطفال
+
+    /**
+     * Children Collection
+     * Fixed: Removed `resource == null` vulnerability
+     */
     match /children/{childId} {
-      allow read, write: if request.auth != null && (resource == null || resource.data.parentId == request.auth.uid || request.resource.data.parentId == request.auth.uid);
+      // Read: parent or their supervisors
+      allow read: if isAuthenticated() && canAccess(resource.data.parentId);
+
+      // Create: only parent can create, must match their uid
+      allow create: if isAuthenticated() &&
+        isOwner(request.resource.data.parentId) &&
+        isValidId(childId) &&
+        request.resource.data.parentId == request.auth.uid;
+
+      // Update: parent or supervisor can update, but NOT parentId
+      allow update: if isAuthenticated() &&
+        canAccess(resource.data.parentId) &&
+        request.resource.data.parentId == resource.data.parentId; // Immutable parentId
+
+      // Delete: only parent
+      allow delete: if isAuthenticated() && isOwner(resource.data.parentId);
     }
 
-    // قواعد حماية المشرفين (الأمهات) - هذا هو الجزء المفقود
+    /**
+     * Supervisors Collection
+     * Parents can invite supervisors to help monitor
+     */
     match /supervisors/{supervisorId} {
-      allow read, write: if request.auth != null && (resource == null || resource.data.parentId == request.auth.uid || request.resource.data.parentId == request.auth.uid);
+      // Read: parent who invited them, or the supervisor themselves
+      allow read: if isAuthenticated() &&
+        (isOwner(resource.data.parentId) || request.auth.uid == supervisorId);
+
+      // Create: only parent can invite supervisors
+      allow create: if isAuthenticated() &&
+        isOwner(request.resource.data.parentId) &&
+        isValidEmail(request.resource.data.email) &&
+        request.resource.data.role == 'SUPERVISOR';
+
+      // Update: parent or supervisor themselves
+      allow update: if isAuthenticated() &&
+        (isOwner(resource.data.parentId) || request.auth.uid == supervisorId) &&
+        request.resource.data.parentId == resource.data.parentId; // Immutable parentId
+
+      // Delete: only parent can remove supervisors
+      allow delete: if isAuthenticated() && isOwner(resource.data.parentId);
     }
 
-    // قواعد سجلات التنبيهات والأدلة الجنائية
+    /**
+     * Alerts Collection
+     * Fixed: Removed unvalidated `allow create`
+     * Alerts should be created via Cloud Functions (server-side) for security
+     */
     match /alerts/{alertId} {
-      allow read, write: if request.auth != null && (resource == null || resource.data.parentId == request.auth.uid);
-      allow create: if request.auth != null;
+      // Read: parent or supervisor
+      allow read: if isAuthenticated() && canAccess(resource.data.parentId);
+
+      // Create: BLOCKED for client-side (use Cloud Functions instead)
+      // This prevents alert injection attacks
+      allow create: if false;
+
+      // Update: only status changes allowed (resolve/dismiss)
+      allow update: if isAuthenticated() &&
+        canAccess(resource.data.parentId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'resolvedAt', 'resolvedBy', 'notes']);
+
+      // Delete: only parent (for cleanup)
+      allow delete: if isAuthenticated() && isOwner(resource.data.parentId);
+    }
+
+    /**
+     * Activities Collection (Audit Logs)
+     * Immutable append-only logs for compliance
+     */
+    match /activities/{activityId} {
+      // Read: parent or supervisor
+      allow read: if isAuthenticated() && canAccess(resource.data.parentId);
+
+      // Create: server-side only via Cloud Functions
+      allow create: if false;
+
+      // Immutable: no updates or deletes
+      allow update, delete: if false;
+    }
+
+    /**
+     * Audit Logs Collection (Phase 5)
+     * Comprehensive audit trail for all critical actions
+     */
+    match /auditLogs/{logId} {
+      // Read: only the parent who owns this log
+      allow read: if isAuthenticated() && isOwner(resource.data.parentId);
+
+      // Create: allowed from client (will be moved to Cloud Functions in production)
+      allow create: if isAuthenticated() &&
+        request.resource.data.parentId == request.auth.uid &&
+        request.resource.data.userId == request.auth.uid;
+
+      // Immutable: no updates or deletes (audit integrity)
+      allow update, delete: if false;
+    }
+
+    /**
+     * 2FA Secrets Collection (Phase 1.4)
+     * Separate collection for two-factor authentication secrets
+     */
+    match /twoFactorSecrets/{parentId} {
+      // Only the parent can access their own 2FA secret
+      allow read, write: if isOwner(parentId);
+    }
+
+    /**
+     * Deny All Other Access (Default Deny)
+     * Any collection not explicitly allowed is blocked
+     */
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

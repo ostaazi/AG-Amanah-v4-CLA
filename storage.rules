@@ -1,0 +1,97 @@
+rules_version = '2';
+
+/**
+ * Amanah Parental Control - Firebase Storage Security Rules
+ * ==========================================================
+ *
+ * Security Model:
+ * - Tenant isolation: parents can only access their own files
+ * - File type validation (images only)
+ * - File size limits (5MB max)
+ * - Path validation (prevent traversal attacks)
+ */
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    /**
+     * Helper Functions
+     */
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(parentId) {
+      return isAuthenticated() && request.auth.uid == parentId;
+    }
+
+    function isValidImageFile() {
+      return request.resource.contentType.matches('image/.*') &&
+        request.resource.size < 5 * 1024 * 1024; // 5MB max
+    }
+
+    function isValidDocumentFile() {
+      return request.resource.contentType.matches('(application/pdf|text/.*|application/json)') &&
+        request.resource.size < 10 * 1024 * 1024; // 10MB max
+    }
+
+    /**
+     * Evidence Vault Screenshots
+     * Path: /evidence/{parentId}/{childId}/{fileName}
+     */
+    match /evidence/{parentId}/{childId}/{fileName} {
+      // Read: only the parent who owns this evidence
+      allow read: if isAuthenticated() && isOwner(parentId);
+
+      // Write: only the parent, must be valid image
+      allow write: if isAuthenticated() &&
+        isOwner(parentId) &&
+        isValidImageFile();
+
+      // Delete: only the parent
+      allow delete: if isAuthenticated() && isOwner(parentId);
+    }
+
+    /**
+     * Avatar Images
+     * Path: /avatars/{parentId}/{fileName}
+     */
+    match /avatars/{parentId}/{fileName} {
+      // Read: authenticated users can view avatars (for UI)
+      allow read: if isAuthenticated();
+
+      // Write: only the parent, must be valid image
+      allow write: if isAuthenticated() &&
+        isOwner(parentId) &&
+        isValidImageFile();
+
+      // Delete: only the parent
+      allow delete: if isAuthenticated() && isOwner(parentId);
+    }
+
+    /**
+     * Data Exports (Backups)
+     * Path: /exports/{parentId}/{fileName}
+     */
+    match /exports/{parentId}/{fileName} {
+      // Read: only the parent
+      allow read: if isAuthenticated() && isOwner(parentId);
+
+      // Write: only the parent, must be valid document
+      allow write: if isAuthenticated() &&
+        isOwner(parentId) &&
+        isValidDocumentFile();
+
+      // Delete: only the parent
+      allow delete: if isAuthenticated() && isOwner(parentId);
+    }
+
+    /**
+     * Deny All Other Access (Default Deny)
+     * Any path not explicitly allowed is blocked
+     */
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

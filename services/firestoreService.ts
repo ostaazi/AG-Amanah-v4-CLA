@@ -25,6 +25,29 @@ const ACTIVITIES_COLLECTION = "activities";
 const SUPERVISORS_COLLECTION = "supervisors";
 
 /**
+ * Validate document ID to prevent path traversal attacks
+ * Phase 1.3: Security hardening
+ */
+const validateDocumentId = (id: string, fieldName: string = 'ID'): void => {
+    if (!id) {
+        throw new Error(`${fieldName} is required`);
+    }
+    // Only allow alphanumeric, hyphens, and underscores (max 128 chars)
+    const validIdPattern = /^[a-zA-Z0-9_-]{1,128}$/;
+    if (!validIdPattern.test(id)) {
+        throw new Error(
+            `Invalid ${fieldName} format. ` +
+            `Only alphanumeric characters, hyphens, and underscores are allowed. ` +
+            `Attempted value: ${id.substring(0, 50)}`
+        );
+    }
+    // Prevent path traversal attempts
+    if (id.includes('..') || id.includes('/') || id.includes('\\')) {
+        throw new Error(`${fieldName} contains invalid path characters: ${id.substring(0, 50)}`);
+    }
+};
+
+/**
  * وظيفة تطهير البيانات العميقة لمنع أخطاء Circular Reference وتحويل التواريخ
  */
 const sanitizeData = (data: any, seen = new WeakSet()): any => {
@@ -57,8 +80,16 @@ const sanitizeData = (data: any, seen = new WeakSet()): any => {
     return data;
 };
 
+/**
+ * Send remote command to child device
+ * Phase 1.3: Added childId validation to prevent command injection
+ */
 export const sendRemoteCommand = async (childId: string, command: string, value: any = true) => {
     if (!db) return;
+
+    // Validate childId to prevent path traversal and command injection
+    validateDocumentId(childId, 'childId');
+
     const childRef = doc(db, CHILDREN_COLLECTION, childId);
     await updateDoc(childRef, {
         [`commands.${command}`]: {
