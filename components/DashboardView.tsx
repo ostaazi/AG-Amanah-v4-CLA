@@ -166,7 +166,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                   <div
                     key={alert.id}
                     onClick={() => handleAlertClick(alert.id)}
-                    className="flex items-center gap-4 p-5 rounded-[2.5rem] bg-slate-50/50 border hover:bg-white hover:shadow-md cursor-pointer transition-all group active:scale-[0.98] border-r-8 border-indigo-100"
+                    className="flex items-center gap-4 p-5 rounded-[2.5rem] bg-slate-50/50 border border-slate-100 hover:bg-white hover:shadow-md cursor-pointer transition-all group active:scale-[0.98] border-r-8 border-r-indigo-100"
                   >
                     <div
                       className={`w-14 h-14 rounded-2xl flex items-center justify-center ${alert.severity === AlertSeverity.CRITICAL ? 'bg-red-100 text-red-600' : 'bg-indigo-100 text-indigo-600'}`}
