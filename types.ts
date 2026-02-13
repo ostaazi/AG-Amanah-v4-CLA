@@ -1,9 +1,8 @@
-
 export enum AlertSeverity {
   LOW = 'LOW',
   MEDIUM = 'MEDIUM',
   HIGH = 'HIGH',
-  CRITICAL = 'CRITICAL'
+  CRITICAL = 'CRITICAL',
 }
 
 export enum Category {
@@ -16,7 +15,7 @@ export enum Category {
   BLACKMAIL = 'ابتزاز',
   SEXUAL_EXPLOITATION = 'استغلال جنسي',
   PHISHING_LINK = 'رابط مشبوه',
-  SAFE = 'آمن'
+  SAFE = 'آمن',
 }
 
 export type UserRole = 'ADMIN' | 'SUPERVISOR' | 'CHILD';
@@ -84,8 +83,8 @@ export interface Child extends FamilyMember {
   cameraBlocked: boolean;
   micBlocked: boolean;
   preventAppInstall: boolean;
-  preventDeviceLock: boolean; 
-  deviceNickname?: string; 
+  preventDeviceLock: boolean;
+  deviceNickname?: string;
   appUsage: AppUsage[];
   location?: ChildLocation;
   psychProfile?: PsychologicalProfile;
@@ -122,7 +121,7 @@ export interface MonitoringAlert {
   childName: string;
   platform: string;
   content: string;
-  imageData?: string; 
+  imageData?: string;
   category: Category;
   severity: AlertSeverity;
   timestamp: Date;

@@ -1,23 +1,18 @@
-
 import {
-    signInWithEmailAndPassword,
-    createUserWithEmailAndPassword,
-    signOut,
-    onAuthStateChanged,
-    sendPasswordResetEmail
-} from "firebase/auth";
-import { auth } from "./firebaseConfig";
-import {
-    setSessionPassword,
-    clearSessionPassword,
-    generateSalt
-} from "./cryptoService";
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+} from 'firebase/auth';
+import { auth } from './firebaseConfig';
+import { setSessionPassword, clearSessionPassword, generateSalt } from './cryptoService';
 
 // واجهة المستخدم المؤمنة (نسخة الإنتاج النهائية)
 export interface CloudUser {
-    uid: string;
-    email: string | null;
-    isAnonymous: boolean;
+  uid: string;
+  email: string | null;
+  isAnonymous: boolean;
 }
 
 /**
@@ -27,24 +22,24 @@ export interface CloudUser {
  * Phase 1.2: Stores password in session memory for encryption
  */
 export const loginParent = async (email: string, pass: string): Promise<CloudUser> => {
-    if (!auth) throw new Error("نواة الأمان غير مهيأة");
+  if (!auth) throw new Error('نواة الأمان غير مهيأة');
 
-    try {
-        const userCredential = await signInWithEmailAndPassword(auth, email, pass);
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, pass);
 
-        // Store password in session memory for encryption (Phase 1.2)
-        // Password is NOT persisted anywhere - only in memory during session
-        setSessionPassword(pass);
+    // Store password in session memory for encryption (Phase 1.2)
+    // Password is NOT persisted anywhere - only in memory during session
+    setSessionPassword(pass);
 
-        return {
-            uid: userCredential.user.uid,
-            email: userCredential.user.email,
-            isAnonymous: userCredential.user.isAnonymous
-        };
-    } catch (error: any) {
-        console.error("Critical Security Event:", error.code);
-        throw new Error(mapAuthError(error.code));
-    }
+    return {
+      uid: userCredential.user.uid,
+      email: userCredential.user.email,
+      isAnonymous: userCredential.user.isAnonymous,
+    };
+  } catch (error: any) {
+    console.error('Critical Security Event:', error.code);
+    throw new Error(mapAuthError(error.code));
+  }
 };
 
 /**
@@ -54,41 +49,41 @@ export const loginParent = async (email: string, pass: string): Promise<CloudUse
  * Returns salt so it can be stored in parent profile
  */
 export const registerParent = async (
-    email: string,
-    pass: string
+  email: string,
+  pass: string
 ): Promise<CloudUser & { encryptionSalt: string }> => {
-    if (!auth) throw new Error("نواة الأمان غير مهيأة");
+  if (!auth) throw new Error('نواة الأمان غير مهيأة');
 
-    try {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
 
-        // Generate unique encryption salt for this user (Phase 1.2)
-        const encryptionSalt = generateSalt();
+    // Generate unique encryption salt for this user (Phase 1.2)
+    const encryptionSalt = generateSalt();
 
-        // Store password in session memory for encryption
-        setSessionPassword(pass);
+    // Store password in session memory for encryption
+    setSessionPassword(pass);
 
-        return {
-            uid: userCredential.user.uid,
-            email: userCredential.user.email,
-            isAnonymous: userCredential.user.isAnonymous,
-            encryptionSalt, // Return salt so caller can save it to Firestore
-        };
-    } catch (error: any) {
-        throw new Error(mapAuthError(error.code));
-    }
+    return {
+      uid: userCredential.user.uid,
+      email: userCredential.user.email,
+      isAnonymous: userCredential.user.isAnonymous,
+      encryptionSalt, // Return salt so caller can save it to Firestore
+    };
+  } catch (error: any) {
+    throw new Error(mapAuthError(error.code));
+  }
 };
 
 /**
  * استعادة كلمة المرور - كود مؤمن
  */
 export const resetPassword = async (email: string): Promise<void> => {
-    if (!auth) throw new Error("نواة الأمان غير مهيأة");
-    try {
-        await sendPasswordResetEmail(auth, email);
-    } catch (error: any) {
-        throw new Error(mapAuthError(error.code));
-    }
+  if (!auth) throw new Error('نواة الأمان غير مهيأة');
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (error: any) {
+    throw new Error(mapAuthError(error.code));
+  }
 };
 
 /**
@@ -96,34 +91,38 @@ export const resetPassword = async (email: string): Promise<void> => {
  * Phase 1.2: Clears session password from memory
  */
 export const logoutUser = async () => {
-    if (!auth) return;
+  if (!auth) return;
 
-    // Clear encryption password from session memory (Phase 1.2)
-    clearSessionPassword();
+  // Clear encryption password from session memory (Phase 1.2)
+  clearSessionPassword();
 
-    await signOut(auth);
+  await signOut(auth);
 };
 
 export const subscribeToAuthChanges = (callback: (user: CloudUser | null) => void) => {
-    if (!auth) return () => {};
-    return onAuthStateChanged(auth, (user: any) => {
-        if (user) {
-            callback({
-                uid: user.uid,
-                email: user.email,
-                isAnonymous: user.isAnonymous
-            });
-        } else {
-            callback(null);
-        }
-    });
+  if (!auth) return () => {};
+  return onAuthStateChanged(auth, (user: any) => {
+    if (user) {
+      callback({
+        uid: user.uid,
+        email: user.email,
+        isAnonymous: user.isAnonymous,
+      });
+    } else {
+      callback(null);
+    }
+  });
 };
 
 const mapAuthError = (code: string) => {
-    switch (code) {
-        case 'auth/invalid-email': return 'البريد الإلكتروني غير صالح.';
-        case 'auth/wrong-password': return 'كلمة المرور غير صحيحة.';
-        case 'auth/user-not-found': return 'الحساب غير موجود.';
-        default: return 'حدث خطأ أمني في النواة.';
-    }
+  switch (code) {
+    case 'auth/invalid-email':
+      return 'البريد الإلكتروني غير صالح.';
+    case 'auth/wrong-password':
+      return 'كلمة المرور غير صحيحة.';
+    case 'auth/user-not-found':
+      return 'الحساب غير موجود.';
+    default:
+      return 'حدث خطأ أمني في النواة.';
+  }
 };

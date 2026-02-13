@@ -1,4 +1,3 @@
-
 /**
  * Amanah 2FA Security Service - Strict TOTP Implementation
  * ========================================================
@@ -16,11 +15,11 @@ import { doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import { encryptData, decryptData, getSessionPassword } from './cryptoService';
 
-const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+const base32chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 const base32ToHex = (base32: string) => {
-  let bits = "";
-  let hex = "";
+  let bits = '';
+  let hex = '';
   for (let i = 0; i < base32.length; i++) {
     const val = base32chars.indexOf(base32.charAt(i).toUpperCase());
     if (val === -1) continue; // تخطي المسافات أو الحروف غير الصحيحة
@@ -42,7 +41,7 @@ const hexToBytes = (hex: string) => {
 };
 
 export const generate2FASecret = () => {
-  let secret = "";
+  let secret = '';
   const randomValues = new Uint8Array(16);
   window.crypto.getRandomValues(randomValues);
   for (let i = 0; i < 16; i++) {
@@ -52,7 +51,7 @@ export const generate2FASecret = () => {
 };
 
 export const getQRCodeUrl = (email: string, secret: string) => {
-  const issuer = "AmanahAI";
+  const issuer = 'AmanahAI';
   const label = `${issuer}:${email}`;
   const otpauthUrl = `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}`;
   return `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(otpauthUrl)}`;
@@ -75,35 +74,39 @@ export async function verifyTOTP(secret: string, code: string): Promise<boolean>
     }
     return false;
   } catch (e) {
-    console.error("2FA Verification Logic Error", e);
+    console.error('2FA Verification Logic Error', e);
     return false;
   }
 }
 
 async function calculateTOTP(secret: string, time: number): Promise<string> {
-    const key = hexToBytes(base32ToHex(secret));
-    const msg = new Uint8Array(8);
-    let v = time;
-    for (let i = 7; i >= 0; i--) {
-      msg[i] = v & 0xff;
-      v = v >> 8;
-    }
+  const key = hexToBytes(base32ToHex(secret));
+  const msg = new Uint8Array(8);
+  let v = time;
+  for (let i = 7; i >= 0; i--) {
+    msg[i] = v & 0xff;
+    v = v >> 8;
+  }
 
-    const cryptoKey = await window.crypto.subtle.importKey(
-      "raw", key, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]
-    );
+  const cryptoKey = await window.crypto.subtle.importKey(
+    'raw',
+    key,
+    { name: 'HMAC', hash: 'SHA-1' },
+    false,
+    ['sign']
+  );
 
-    const hmac = await window.crypto.subtle.sign("HMAC", cryptoKey, msg);
-    const hmacArray = new Uint8Array(hmac);
-    const offset = hmacArray[hmacArray.length - 1] & 0xf;
-    
-    const binary =
-      ((hmacArray[offset] & 0x7f) << 24) |
-      ((hmacArray[offset + 1] & 0xff) << 16) |
-      ((hmacArray[offset + 2] & 0xff) << 8) |
-      (hmacArray[offset + 3] & 0xff);
+  const hmac = await window.crypto.subtle.sign('HMAC', cryptoKey, msg);
+  const hmacArray = new Uint8Array(hmac);
+  const offset = hmacArray[hmacArray.length - 1] & 0xf;
 
-    return (binary % 1000000).toString().padStart(6, '0');
+  const binary =
+    ((hmacArray[offset] & 0x7f) << 24) |
+    ((hmacArray[offset + 1] & 0xff) << 16) |
+    ((hmacArray[offset + 2] & 0xff) << 8) |
+    (hmacArray[offset + 3] & 0xff);
+
+  return (binary % 1000000).toString().padStart(6, '0');
 }
 
 export const verifyTOTPCode = (code: string): boolean => {
@@ -120,7 +123,7 @@ export function generateBackupCodes(): string[] {
     const randomBytes = new Uint8Array(4);
     window.crypto.getRandomValues(randomBytes);
     const code = Array.from(randomBytes)
-      .map(b => b.toString().padStart(3, '0'))
+      .map((b) => b.toString().padStart(3, '0'))
       .join('')
       .substring(0, 8);
     codes.push(code);
@@ -155,7 +158,7 @@ export async function enable2FA(
   // Encrypt secret and backup codes
   const encryptedSecret = await encryptData(secret, password, encryptionSalt);
   const encryptedBackupCodes = await Promise.all(
-    backupCodes.map(code => encryptData(code, password, encryptionSalt))
+    backupCodes.map((code) => encryptData(code, password, encryptionSalt))
   );
 
   // Store in separate twoFactorSecrets collection
@@ -228,7 +231,7 @@ export async function verify2FACode(
 
     // Decrypt all backup codes
     const backupCodes = await Promise.all(
-      backupCodesEncrypted.map(encrypted => decryptData(encrypted, password))
+      backupCodesEncrypted.map((encrypted) => decryptData(encrypted, password))
     );
 
     // Find matching backup code

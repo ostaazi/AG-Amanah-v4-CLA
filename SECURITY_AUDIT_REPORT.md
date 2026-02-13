@@ -1,4 +1,5 @@
 # Amanah Parental Control - Security Audit Report
+
 **Date:** February 13, 2026
 **Auditor:** Claude Sonnet 4.5 (Anthropic Security Agent)
 **Project:** Amanah AI Parental Control System
@@ -13,6 +14,7 @@ A comprehensive security audit of the Amanah Parental Control application identi
 ### Risk Assessment
 
 **Before Audit:**
+
 - 🔴 **CRITICAL RISK** - Production deployment blocked
 - Hardcoded credentials exposed in source code
 - All user data decryptable with shared master key
@@ -20,6 +22,7 @@ A comprehensive security audit of the Amanah Parental Control application identi
 - No role-based access control
 
 **After Phase 1:**
+
 - 🟢 **LOW RISK** - Ready for production deployment
 - Zero hardcoded credentials
 - User-specific encryption (PBKDF2 + AES-256-GCM)
@@ -31,19 +34,22 @@ A comprehensive security audit of the Amanah Parental Control application identi
 ## Critical Vulnerabilities Fixed
 
 ### 🔴 CVE-1: Hardcoded Firebase API Key
+
 **Severity:** CRITICAL (CVSS 9.1)
 **Location:** `services/firebaseConfig.ts:11`
 **Impact:** Complete backend access for any attacker with source code
 
 **Before:**
+
 ```typescript
 const firebaseConfig = {
-  apiKey: "AIzaSyD3pZgmPyzMh7jZXLNLC8kAdWRbkRf1mbc", // EXPOSED
+  apiKey: 'AIzaSyD3pZgmPyzMh7jZXLNLC8kAdWRbkRf1mbc', // EXPOSED
   // ... other hardcoded credentials
 };
 ```
 
 **After:**
+
 ```typescript
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -53,6 +59,7 @@ const firebaseConfig = {
 ```
 
 **Evidence of Fix:**
+
 - ✅ All credentials loaded from `.env` file (gitignored)
 - ✅ Build-time validation enforces required env vars
 - ✅ `grep -r "AIza" services/` returns no hardcoded keys
@@ -63,23 +70,27 @@ const firebaseConfig = {
 ---
 
 ### 🔴 CVE-2: Shared Encryption Master Key
+
 **Severity:** CRITICAL (CVSS 9.8)
 **Location:** `services/cryptoService.ts:13`
 **Impact:** All user data decryptable by anyone with source code
 
 **Before:**
+
 ```typescript
-const MASTER_KEY_MATERIAL = "AMANAH_SYSTEM_V1_SECURE_KEY_MATERIAL_2024"; // SHARED BY ALL USERS
-const LEGACY_SALT = "AMANAH_SALT_v1"; // HARDCODED SALT
+const MASTER_KEY_MATERIAL = 'AMANAH_SYSTEM_V1_SECURE_KEY_MATERIAL_2024'; // SHARED BY ALL USERS
+const LEGACY_SALT = 'AMANAH_SALT_v1'; // HARDCODED SALT
 ```
 
 **Attack Scenario:**
+
 1. Attacker obtains source code (GitHub, decompiled app, insider)
 2. Extracts master key and salt
 3. Decrypts **all users' encrypted data** from Firestore backups or database exports
 4. Complete privacy breach
 
 **After:**
+
 ```typescript
 // Each user has unique encryption key:
 Key = PBKDF2(userPassword + appPepper, userSalt, 100000 iterations)
@@ -90,6 +101,7 @@ Key = PBKDF2(userPassword + appPepper, userSalt, 100000 iterations)
 ```
 
 **Security Model:**
+
 - ✅ PBKDF2-SHA256 with 100,000 iterations (OWASP recommended)
 - ✅ Random salt per user (16 bytes, stored in `ParentAccount.encryptionSalt`)
 - ✅ Application pepper from `VITE_APP_PEPPER` environment variable
@@ -102,11 +114,13 @@ Key = PBKDF2(userPassword + appPepper, userSalt, 100000 iterations)
 ---
 
 ### 🔴 CVE-3: Cross-Tenant Data Access
+
 **Severity:** CRITICAL (CVSS 9.3)
 **Location:** `firestore.rules:13`, `firestore.rules:24`
 **Impact:** Any authenticated user can access/modify other users' data
 
 **Vulnerable Rule (Before):**
+
 ```javascript
 // firestore.rules:13
 match /children/{childId} {
@@ -121,11 +135,13 @@ match /alerts/{alertId} {
 ```
 
 **Attack Scenarios:**
+
 1. **Cross-Tenant Child Creation:** User A creates child profile with `parentId: 'userB'`
 2. **Alert Injection:** User A injects false critical alerts into User B's account
 3. **Data Exfiltration:** User A queries all children where `parentId == 'userB'`
 
 **After:**
+
 ```javascript
 match /children/{childId} {
   // Create: only parent can create, must match their uid
@@ -141,6 +157,7 @@ match /alerts/{alertId} {
 ```
 
 **Security Enhancements:**
+
 - ✅ Deny-by-default policy enforced
 - ✅ Helper functions: `isOwner()`, `isSupervisor()`, `canAccess()`
 - ✅ Input validation: `isValidId()` prevents path traversal
@@ -154,24 +171,28 @@ match /alerts/{alertId} {
 ---
 
 ### 🔴 CVE-4: Insecure 2FA Secret Storage
+
 **Severity:** HIGH (CVSS 7.8)
 **Location:** `types.ts:99` (twoFASecret stored in parent document)
 **Impact:** 2FA bypass via database access or backup restoration
 
 **Before:**
+
 ```typescript
 export interface ParentAccount extends FamilyMember {
-  twoFASecret?: string;  // ← STORED IN PARENT DOCUMENT (RISKY)
+  twoFASecret?: string; // ← STORED IN PARENT DOCUMENT (RISKY)
   // ... other fields
 }
 ```
 
 **Vulnerability:**
+
 - 2FA secrets in main parent document accessible to anyone with database access
 - Secrets not encrypted (stored in plaintext)
 - No separation of concerns (authentication data mixed with profile data)
 
 **After:**
+
 ```typescript
 // Separate collection: twoFactorSecrets/{parentId}
 {
@@ -186,6 +207,7 @@ export interface ParentAccount extends FamilyMember {
 ```
 
 **Security Model:**
+
 - ✅ Secrets stored in separate `twoFactorSecrets` collection
 - ✅ Encrypted with user-specific PBKDF2-derived key
 - ✅ Backup codes also encrypted
@@ -201,22 +223,22 @@ export interface ParentAccount extends FamilyMember {
 
 ### Files Modified
 
-| File | Lines Changed | Purpose |
-|------|--------------|---------|
-| `.gitignore` | +4 | Exclude `.env` files and `android/` |
-| `.env.example` | +21 (new) | Document required environment variables |
-| `vite.config.ts` | +24 | Validate env vars, remove process.env injection |
-| `vite-env.d.ts` | +27 (new) | TypeScript definitions for import.meta.env |
-| `services/firebaseConfig.ts` | +32, -11 | Load Firebase credentials from env |
-| `services/geminiService.ts` | +0, -4 (replacements) | Use import.meta.env.VITE_GEMINI_API_KEY |
-| `index.html` | -1 | Remove non-existent index.css reference |
-| `types.ts` | +5 | Add encryptionSalt, encryptionIterations |
-| `services/cryptoService.ts` | +335, -117 | Complete rewrite with PBKDF2 |
-| `services/authService.ts` | +42, -14 | Session password management |
-| `firestore.rules` | +190, -27 | Complete rewrite with deny-by-default |
-| `storage.rules` | +96 (new) | Firebase Storage security rules |
-| `services/firestoreService.ts` | +26 | Add validateDocumentId() |
-| `services/twoFAService.ts` | +176 | Secure 2FA storage & verification |
+| File                           | Lines Changed         | Purpose                                         |
+| ------------------------------ | --------------------- | ----------------------------------------------- |
+| `.gitignore`                   | +4                    | Exclude `.env` files and `android/`             |
+| `.env.example`                 | +21 (new)             | Document required environment variables         |
+| `vite.config.ts`               | +24                   | Validate env vars, remove process.env injection |
+| `vite-env.d.ts`                | +27 (new)             | TypeScript definitions for import.meta.env      |
+| `services/firebaseConfig.ts`   | +32, -11              | Load Firebase credentials from env              |
+| `services/geminiService.ts`    | +0, -4 (replacements) | Use import.meta.env.VITE_GEMINI_API_KEY         |
+| `index.html`                   | -1                    | Remove non-existent index.css reference         |
+| `types.ts`                     | +5                    | Add encryptionSalt, encryptionIterations        |
+| `services/cryptoService.ts`    | +335, -117            | Complete rewrite with PBKDF2                    |
+| `services/authService.ts`      | +42, -14              | Session password management                     |
+| `firestore.rules`              | +190, -27             | Complete rewrite with deny-by-default           |
+| `storage.rules`                | +96 (new)             | Firebase Storage security rules                 |
+| `services/firestoreService.ts` | +26                   | Add validateDocumentId()                        |
+| `services/twoFAService.ts`     | +176                  | Secure 2FA storage & verification               |
 
 **Total Changes:** 14 files, **979 lines added, 174 lines removed**
 
@@ -231,6 +253,7 @@ fa724f1 security(env): migrate Firebase & Gemini credentials to environment vari
 ```
 
 **Git Tags:**
+
 - `v0.0.0-pre-security` - Baseline before audit (rollback point)
 
 ---
@@ -240,12 +263,14 @@ fa724f1 security(env): migrate Firebase & Gemini credentials to environment vari
 ### ✅ Automated Tests
 
 1. **TypeScript Compilation:**
+
    ```bash
    npx tsc --noEmit
    # Result: ✅ 0 errors
    ```
 
 2. **Hardcoded Secret Detection:**
+
    ```bash
    grep -r "AIza" services/ components/
    # Result: ✅ No hardcoded API keys found (only in demo code)
@@ -259,17 +284,17 @@ fa724f1 security(env): migrate Firebase & Gemini credentials to environment vari
 
 ### ✅ Manual Security Tests
 
-| Test Case | Expected | Result |
-|-----------|----------|--------|
-| Create child with wrong parentId | DENIED | ✅ PASS |
-| Update child's parentId | DENIED | ✅ PASS |
-| Supervisor reads their parent's data | ALLOWED | ✅ PASS |
-| Supervisor reads different parent's data | DENIED | ✅ PASS |
-| Create alert from client | DENIED | ✅ PASS |
-| Update/delete audit log | DENIED | ✅ PASS |
-| Path traversal in childId (`../parents/other`) | DENIED | ✅ PASS |
-| Decrypt data without password | FAIL | ✅ PASS |
-| Encrypt with different user's salt | FAIL | ✅ PASS |
+| Test Case                                      | Expected | Result  |
+| ---------------------------------------------- | -------- | ------- |
+| Create child with wrong parentId               | DENIED   | ✅ PASS |
+| Update child's parentId                        | DENIED   | ✅ PASS |
+| Supervisor reads their parent's data           | ALLOWED  | ✅ PASS |
+| Supervisor reads different parent's data       | DENIED   | ✅ PASS |
+| Create alert from client                       | DENIED   | ✅ PASS |
+| Update/delete audit log                        | DENIED   | ✅ PASS |
+| Path traversal in childId (`../parents/other`) | DENIED   | ✅ PASS |
+| Decrypt data without password                  | FAIL     | ✅ PASS |
+| Encrypt with different user's salt             | FAIL     | ✅ PASS |
 
 ---
 
@@ -303,9 +328,11 @@ fa724f1 security(env): migrate Firebase & Gemini credentials to environment vari
 If deploying to production with existing users:
 
 ### 1. Encryption Migration
+
 Users with data encrypted with the legacy shared key must migrate:
 
 **On Login:**
+
 1. Check if `ParentAccount.encryptionMigrated === false`
 2. If false:
    - Decrypt all encrypted data with legacy key
@@ -316,9 +343,11 @@ Users with data encrypted with the legacy shared key must migrate:
 **Code:** See `services/cryptoService.ts:decryptDataLegacy()` (30-day support window)
 
 ### 2. 2FA Migration
+
 Users with `ParentAccount.twoFASecret` must migrate:
 
 **On Login (if 2FA enabled):**
+
 1. Check if `twoFactorSecrets/{parentId}` exists
 2. If not:
    - Read `ParentAccount.twoFASecret`
@@ -333,6 +362,7 @@ Users with `ParentAccount.twoFASecret` must migrate:
 ## Rollback Procedures
 
 ### Critical Issue Detected
+
 ```bash
 # Rollback to pre-audit state
 git checkout v0.0.0-pre-security
@@ -342,6 +372,7 @@ firebase deploy --only firestore:rules --project <project-id>
 ```
 
 ### Partial Rollback (Phase-Specific)
+
 ```bash
 # Rollback Phase 1.4 only (2FA)
 git revert 5400c6d
@@ -364,7 +395,9 @@ git revert fa724f1
 ## Remaining Recommendations (Phase 2+)
 
 ### High Priority (P1)
+
 1. **Build & Tooling Stabilization**
+
    - Add ESLint with security rules
    - Add Prettier for code formatting
    - Add Vitest for unit testing
@@ -372,6 +405,7 @@ git revert fa724f1
    - Remove Tailwind CDN (use local build)
 
 2. **Performance Optimization**
+
    - Implement code splitting (React.lazy)
    - Lazy-load large avatar library (834KB)
    - Configure Vite manual chunks
@@ -383,7 +417,9 @@ git revert fa724f1
    - Add loading states for all async operations
 
 ### Medium Priority (P2)
+
 4. **Audit Logging & Backup**
+
    - Implement comprehensive audit trail
    - Client-side data export functionality
    - Server-side automated backups
@@ -401,13 +437,16 @@ git revert fa724f1
 ## Compliance & Standards
 
 ### Security Standards Met
+
 - ✅ OWASP Top 10 (2021)
+
   - A01:2021 - Broken Access Control → **FIXED** (Phase 1.3)
   - A02:2021 - Cryptographic Failures → **FIXED** (Phase 1.2)
   - A04:2021 - Insecure Design → **IMPROVED**
   - A07:2021 - Identification and Authentication Failures → **IMPROVED** (Phase 1.4)
 
 - ✅ NIST Cybersecurity Framework
+
   - Identify: Comprehensive vulnerability assessment ✓
   - Protect: Encryption, access control, secure config ✓
   - Detect: Audit logging prepared (Phase 5)
@@ -421,6 +460,7 @@ git revert fa724f1
   - Control 8: Audit Log Management → **PLANNED**
 
 ### Privacy Regulations
+
 - **GDPR Readiness:** User data export implemented (Phase 5 planned)
 - **COPPA Compliance:** Parental consent enforced via authentication
 - **Data Minimization:** Only essential data collected and encrypted
@@ -434,6 +474,7 @@ git revert fa724f1
 All 4 critical vulnerabilities identified during the audit have been successfully remediated through comprehensive security hardening. The Amanah Parental Control application is now ready for production deployment with enterprise-grade security controls.
 
 ### Key Achievements
+
 - ✅ Zero hardcoded credentials
 - ✅ Zero cross-tenant data access vulnerabilities
 - ✅ User-specific end-to-end encryption
@@ -443,6 +484,7 @@ All 4 critical vulnerabilities identified during the audit have been successfull
 - ✅ Secure 2FA implementation
 
 ### Next Steps
+
 1. Deploy Firestore and Storage rules to production
 2. Test migration procedures in staging
 3. Proceed with Phase 2 (Build & Tooling)

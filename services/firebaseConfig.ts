@@ -1,7 +1,6 @@
-
-import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 
 /**
  * Amanah Secure Configuration
@@ -23,8 +22,8 @@ for (const envVar of requiredEnvVars) {
   if (!import.meta.env[envVar]) {
     throw new Error(
       `Missing required environment variable: ${envVar}\n` +
-      `Please ensure .env file exists and contains all required Firebase credentials.\n` +
-      `See .env.example for reference.`
+        `Please ensure .env file exists and contains all required Firebase credentials.\n` +
+        `See .env.example for reference.`
     );
   }
 }
@@ -43,19 +42,19 @@ let dbInstance: any = null;
 let authInstance: any = null;
 
 try {
-    app = initializeApp(firebaseConfig);
-    dbInstance = getFirestore(app);
-    authInstance = getAuth(app);
-    console.log("🛡️ Amanah Kernel: Firebase Secure Connection Established");
+  app = initializeApp(firebaseConfig);
+  dbInstance = getFirestore(app);
+  authInstance = getAuth(app);
+  console.log('🛡️ Amanah Kernel: Firebase Secure Connection Established');
 } catch (error: any) {
-    if (!/already exists/.test(error.message)) {
-        console.error('Kernel Initialization Error:', error.stack);
-    }
+  if (!/already exists/.test(error.message)) {
+    console.error('Kernel Initialization Error:', error.stack);
+  }
 }
 
 export const db = dbInstance;
 export const auth = authInstance;
 
 export const checkConnection = async () => {
-    return dbInstance ? "CONNECTED_SECURE" : "DISCONNECTED"; 
+  return dbInstance ? 'CONNECTED_SECURE' : 'DISCONNECTED';
 };

@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
 
   // Validate required environment variables
-  const missingVars = requiredEnvVars.filter(key => !env[key]);
+  const missingVars = requiredEnvVars.filter((key) => !env[key]);
   if (missingVars.length > 0) {
     throw new Error(
       `Missing required environment variables:\n${missingVars.join('\n')}\n\nPlease copy .env.example to .env and fill in your values.`
@@ -34,7 +34,7 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
-      }
+      },
     },
     build: {
       outDir: 'dist',

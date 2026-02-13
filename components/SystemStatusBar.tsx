@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 
 interface SystemStatusBarProps {
@@ -19,14 +18,26 @@ const SystemStatusBar: React.FC<SystemStatusBarProps> = ({ hasCriticalAlert, ale
       {/* Left side: Icons & Notifications */}
       <div className="flex items-center gap-2">
         <span className="font-black tracking-tighter">Amanah AI</span>
-        <span className="bg-indigo-600 text-white px-2 py-[1px] rounded text-[8px] tracking-widest uppercase shadow-lg opacity-100 border border-indigo-400">v1.0 STABLE GOLD</span>
-        
+        <span className="bg-indigo-600 text-white px-2 py-[1px] rounded text-[8px] tracking-widest uppercase shadow-lg opacity-100 border border-indigo-400">
+          v1.0 STABLE GOLD
+        </span>
+
         {alertCount > 0 && (
           <div className="flex items-center gap-1.5 animate-in fade-in slide-in-from-left-2 ml-2">
-            <div className={`w-1.5 h-1.5 rounded-full ${hasCriticalAlert ? 'bg-red-600 animate-pulse' : 'bg-amber-500'}`}></div>
+            <div
+              className={`w-1.5 h-1.5 rounded-full ${hasCriticalAlert ? 'bg-red-600 animate-pulse' : 'bg-amber-500'}`}
+            ></div>
             {hasCriticalAlert && (
-              <svg className="w-3 h-3 text-red-600 animate-bounce" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              <svg
+                className="w-3 h-3 text-red-600 animate-bounce"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                  clipRule="evenodd"
+                />
               </svg>
             )}
           </div>
@@ -40,7 +51,9 @@ const SystemStatusBar: React.FC<SystemStatusBarProps> = ({ hasCriticalAlert, ale
 
       {/* Right side: Phone Status */}
       <div className="flex items-center gap-2 opacity-80">
-        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" /></svg>
+        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
+        </svg>
         <span>5G</span>
         <div className="flex items-center gap-0.5 border border-slate-600 rounded-sm px-0.5 h-3">
           <div className="w-3 h-1.5 bg-slate-800 rounded-sm"></div>

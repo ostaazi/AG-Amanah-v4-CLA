@@ -83,10 +83,7 @@ export function generateSalt(): string {
  * @param salt User's unique salt (stored in Firestore)
  * @returns CryptoKey for AES-GCM encryption
  */
-async function deriveKeyFromPassword(
-  password: string,
-  salt: Uint8Array
-): Promise<CryptoKey> {
+async function deriveKeyFromPassword(password: string, salt: Uint8Array): Promise<CryptoKey> {
   // Get application pepper from environment
   const pepper = import.meta.env.VITE_APP_PEPPER || '';
   if (!pepper || pepper.includes('change_in_production')) {
@@ -180,10 +177,7 @@ export async function encryptData(
  * @param userPassword User's password (from session)
  * @returns Decrypted plaintext
  */
-export async function decryptData(
-  cipherTextObj: string,
-  userPassword?: string
-): Promise<string> {
+export async function decryptData(cipherTextObj: string, userPassword?: string): Promise<string> {
   try {
     // Try to parse as encrypted payload
     let payload: EncryptedPayload;

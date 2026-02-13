@@ -1,7 +1,14 @@
-
 import React, { useState, useEffect, Suspense } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { Child, MonitoringAlert, ParentAccount, AlertSeverity, Category, UserRole, CustomMode } from './types';
+import {
+  Child,
+  MonitoringAlert,
+  ParentAccount,
+  AlertSeverity,
+  Category,
+  UserRole,
+  CustomMode,
+} from './types';
 
 // استيراد المكونات من مساراتها الصحيحة داخل components/
 import DashboardView from './components/DashboardView';
@@ -31,44 +38,84 @@ import {
   subscribeToAlerts,
   logUserActivity,
   inviteSupervisor,
-  updatePairingKeyInDB
+  updatePairingKeyInDB,
 } from './services/firestoreService';
 import { translations } from './translations';
 import { MY_DESIGNED_ASSETS, FALLBACK_ASSETS } from './assets';
 
 // تعريف المكونات الفرعية داخل الملف لضمان عملها
-const NavLink: React.FC<{ to: string, icon: any, label: string }> = ({ to, icon, label }) => {
+const NavLink: React.FC<{ to: string; icon: any; label: string }> = ({ to, icon, label }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const isActive = location.pathname === to;
   return (
-    <button onClick={() => navigate(to)} className={`flex flex-col items-center justify-center min-w-[65px] p-2 rounded-2xl transition-all ${isActive ? 'bg-indigo-50 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}>
+    <button
+      onClick={() => navigate(to)}
+      className={`flex flex-col items-center justify-center min-w-[65px] p-2 rounded-2xl transition-all ${isActive ? 'bg-indigo-50 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+    >
       <div className={`${isActive ? 'scale-110' : 'scale-100'} transition-transform`}>{icon}</div>
-      <span className={`text-[9px] font-black mt-1 uppercase tracking-tighter ${isActive ? 'opacity-100' : 'opacity-60'}`}>{label}</span>
+      <span
+        className={`text-[9px] font-black mt-1 uppercase tracking-tighter ${isActive ? 'opacity-100' : 'opacity-60'}`}
+      >
+        {label}
+      </span>
     </button>
   );
 };
 
-const Sidebar: React.FC<{ isOpen: boolean, onClose: () => void, lang: 'ar' | 'en', menuItems: any[] }> = ({ isOpen, onClose, lang, menuItems }) => {
+const Sidebar: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  lang: 'ar' | 'en';
+  menuItems: any[];
+}> = ({ isOpen, onClose, lang, menuItems }) => {
   const navigate = useNavigate();
   return (
-    <div className={`fixed inset-0 z-[6000] transition-all duration-500 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+    <div
+      className={`fixed inset-0 z-[6000] transition-all duration-500 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+    >
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={onClose} />
-      <div className={`absolute top-0 bottom-0 w-80 bg-white shadow-2xl transition-transform duration-500 flex flex-col ${lang === 'ar' ? (isOpen ? 'right-0' : 'right-[-100%]') : (isOpen ? 'left-0' : 'left-[-100%]')}`}>
+      <div
+        className={`absolute top-0 bottom-0 w-80 bg-white shadow-2xl transition-transform duration-500 flex flex-col ${lang === 'ar' ? (isOpen ? 'right-0' : 'right-[-100%]') : isOpen ? 'left-0' : 'left-[-100%]'}`}
+      >
         <div className="p-10 pb-6 border-b border-slate-50 flex justify-between items-center">
-          <div className="w-24"><AmanahLogo /></div>
-          <button onClick={onClose} className="p-3 bg-slate-50 rounded-full text-slate-400 hover:text-slate-900 hover:rotate-90 transition-all"><ICONS.Close /></button>
+          <div className="w-24">
+            <AmanahLogo />
+          </div>
+          <button
+            onClick={onClose}
+            className="p-3 bg-slate-50 rounded-full text-slate-400 hover:text-slate-900 hover:rotate-90 transition-all"
+          >
+            <ICONS.Close />
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-2 text-right">
           {menuItems.map((item) => (
-            <button key={item.path} onClick={() => { navigate(item.path); onClose(); }} className="w-full flex items-center gap-6 p-5 rounded-[2rem] hover:bg-indigo-50 transition-all text-right group active:scale-95">
-              <div className="text-slate-400 group-hover:text-indigo-600 group-hover:scale-110 transition-all">{item.icon}</div>
-              <span className="font-black text-slate-700 group-hover:text-indigo-600">{item.label}</span>
+            <button
+              key={item.path}
+              onClick={() => {
+                navigate(item.path);
+                onClose();
+              }}
+              className="w-full flex items-center gap-6 p-5 rounded-[2rem] hover:bg-indigo-50 transition-all text-right group active:scale-95"
+            >
+              <div className="text-slate-400 group-hover:text-indigo-600 group-hover:scale-110 transition-all">
+                {item.icon}
+              </div>
+              <span className="font-black text-slate-700 group-hover:text-indigo-600">
+                {item.label}
+              </span>
             </button>
           ))}
         </div>
         <div className="p-8 border-t border-slate-50 bg-slate-50/50">
-          <button onClick={() => { logoutUser(); onClose(); }} className="w-full py-5 bg-white text-red-600 rounded-3xl font-black text-sm uppercase tracking-widest border border-red-50 flex items-center justify-center gap-3 shadow-sm hover:bg-red-50 transition-all">
+          <button
+            onClick={() => {
+              logoutUser();
+              onClose();
+            }}
+            className="w-full py-5 bg-white text-red-600 rounded-3xl font-black text-sm uppercase tracking-widest border border-red-50 flex items-center justify-center gap-3 shadow-sm hover:bg-red-50 transition-all"
+          >
             🗑️ تسجيل الخروج
           </button>
         </div>
@@ -90,15 +137,50 @@ const App: React.FC = () => {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
 
   const [currentUser, setCurrentUser] = useState<ParentAccount>({
-    id: 'guest', name: 'الوالد', role: 'ADMIN', avatar: MY_DESIGNED_ASSETS.ADMIN_AVATAR || FALLBACK_ASSETS.ADMIN,
-    alertProtocol: 'FULL'
+    id: 'guest',
+    name: 'الوالد',
+    role: 'ADMIN',
+    avatar: MY_DESIGNED_ASSETS.ADMIN_AVATAR || FALLBACK_ASSETS.ADMIN,
+    alertProtocol: 'FULL',
   });
   const [children, setChildren] = useState<Child[]>([]);
   const [alerts, setAlerts] = useState<MonitoringAlert[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [modes, setModes] = useState<CustomMode[]>([
-    { id: 'm1', name: 'وقت المذاكرة', icon: '📚', color: 'bg-indigo-600', allowedApps: ['Educational'], allowedUrls: [], blacklistedUrls: ['tiktok.com'], cameraEnabled: false, micEnabled: true, isInternetCut: false, isScreenDimmed: false, isDeviceLocked: false, internetStartTime: '08:00', internetEndTime: '14:00', activeDays: [0, 1, 2, 3, 4] },
-    { id: 'm2', name: 'وقت النوم', icon: '🌙', color: 'bg-slate-900', allowedApps: [], allowedUrls: [], blacklistedUrls: [], cameraEnabled: false, micEnabled: false, isInternetCut: true, isScreenDimmed: true, isDeviceLocked: true, internetStartTime: '21:00', internetEndTime: '07:00', activeDays: [0, 1, 2, 3, 4, 5, 6] }
+    {
+      id: 'm1',
+      name: 'وقت المذاكرة',
+      icon: '📚',
+      color: 'bg-indigo-600',
+      allowedApps: ['Educational'],
+      allowedUrls: [],
+      blacklistedUrls: ['tiktok.com'],
+      cameraEnabled: false,
+      micEnabled: true,
+      isInternetCut: false,
+      isScreenDimmed: false,
+      isDeviceLocked: false,
+      internetStartTime: '08:00',
+      internetEndTime: '14:00',
+      activeDays: [0, 1, 2, 3, 4],
+    },
+    {
+      id: 'm2',
+      name: 'وقت النوم',
+      icon: '🌙',
+      color: 'bg-slate-900',
+      allowedApps: [],
+      allowedUrls: [],
+      blacklistedUrls: [],
+      cameraEnabled: false,
+      micEnabled: false,
+      isInternetCut: true,
+      isScreenDimmed: true,
+      isDeviceLocked: true,
+      internetStartTime: '21:00',
+      internetEndTime: '07:00',
+      activeDays: [0, 1, 2, 3, 4, 5, 6],
+    },
   ]);
 
   const t = translations[lang];
@@ -121,14 +203,16 @@ const App: React.FC = () => {
     try {
       await updateMemberInDB(id, role, updates);
       if (id === currentUser.id) {
-        setCurrentUser(prev => ({ ...prev, ...updates }));
+        setCurrentUser((prev) => ({ ...prev, ...updates }));
       }
       logUserActivity(currentUser.id, {
-        action: "تحديث بيانات",
+        action: 'تحديث بيانات',
         details: `تم تحديث إعدادات ${role} بنجاح`,
-        type: 'SUCCESS'
+        type: 'SUCCESS',
       });
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const handleMinimizeEmergency = (alert: MonitoringAlert) => {
@@ -144,16 +228,20 @@ const App: React.FC = () => {
           const { profile } = await syncParentProfile(user.uid, user.email, currentUser);
           setCurrentUser({
             ...profile,
-            alertProtocol: profile.alertProtocol || (profile.emergencyOverlayEnabled === false ? 'SIMPLE' : 'FULL')
+            alertProtocol:
+              profile.alertProtocol ||
+              (profile.emergencyOverlayEnabled === false ? 'SIMPLE' : 'FULL'),
           });
           setIsAuthenticated(true);
           const uid = user.uid || '';
           const raw = uid.replace(/[^A-Z0-9]/gi, '').toUpperCase();
           if (raw.length >= 4) {
-            const key = raw.substring(0, 4) + "-" + raw.substring(Math.max(0, raw.length - 4));
+            const key = raw.substring(0, 4) + '-' + raw.substring(Math.max(0, raw.length - 4));
             await updatePairingKeyInDB(user.uid, key);
           }
-        } catch (e) { console.error(e); }
+        } catch (e) {
+          console.error(e);
+        }
       } else {
         setIsAuthenticated(false);
         setChildren([]);
@@ -203,74 +291,199 @@ const App: React.FC = () => {
     // Safety fallback
     const safetyTimer = setTimeout(() => setIsLoadingData(false), 5000);
 
-    return () => { unsubChildren(); unsubAlerts(); clearTimeout(safetyTimer); };
+    return () => {
+      unsubChildren();
+      unsubAlerts();
+      clearTimeout(safetyTimer);
+    };
   }, [isAuthenticated, currentUser.id, alerts.length, currentUser.alertProtocol]);
 
-  if (isAuthChecking) return (
-    <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center relative overflow-hidden" dir="rtl">
-      <AmanahGlobalDefs />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none"></div>
-      <div className="relative z-10 flex flex-col items-center animate-in fade-in duration-1000">
-        <div className="w-48 mb-10 transform scale-125">
-          <AmanahShield className="w-full h-auto" />
-        </div>
-        <div className="text-center space-y-4">
-          <h1 className="text-3xl font-black text-white tracking-tighter brand-font">أمانة • Amanah AI</h1>
-          <div className="flex flex-col items-center gap-2">
-            <div className="flex items-center gap-2 px-4 py-1.5 bg-white/5 rounded-full border border-white/10 shadow-xl">
-              <span className="w-2 h-2 bg-indigo-50 rounded-full animate-ping"></span>
-              <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">System Initialization...</p>
+  if (isAuthChecking)
+    return (
+      <div
+        className="min-h-screen bg-[#020617] flex flex-col items-center justify-center relative overflow-hidden"
+        dir="rtl"
+      >
+        <AmanahGlobalDefs />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none"></div>
+        <div className="relative z-10 flex flex-col items-center animate-in fade-in duration-1000">
+          <div className="w-48 mb-10 transform scale-125">
+            <AmanahShield className="w-full h-auto" />
+          </div>
+          <div className="text-center space-y-4">
+            <h1 className="text-3xl font-black text-white tracking-tighter brand-font">
+              أمانة • Amanah AI
+            </h1>
+            <div className="flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2 px-4 py-1.5 bg-white/5 rounded-full border border-white/10 shadow-xl">
+                <span className="w-2 h-2 bg-indigo-50 rounded-full animate-ping"></span>
+                <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">
+                  System Initialization...
+                </p>
+              </div>
             </div>
           </div>
         </div>
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 w-40 h-1 bg-white/5 rounded-full overflow-hidden border border-white/5">
+          <div className="h-full bg-gradient-to-r from-transparent via-indigo-500 to-transparent w-24 animate-loading-slide"></div>
+        </div>
       </div>
-      <div className="absolute bottom-20 left-1/2 -translate-x-1/2 w-40 h-1 bg-white/5 rounded-full overflow-hidden border border-white/5">
-        <div className="h-full bg-gradient-to-r from-transparent via-indigo-500 to-transparent w-24 animate-loading-slide"></div>
-      </div>
-    </div>
-  );
+    );
 
-  if (!isAuthenticated) return <AuthView onLoginSuccess={() => { }} />;
+  if (!isAuthenticated) return <AuthView onLoginSuccess={() => {}} />;
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-['Cairo'] relative overflow-x-hidden" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+    <div
+      className="min-h-screen bg-[#f8fafc] text-slate-900 font-['Cairo'] relative overflow-x-hidden"
+      dir={lang === 'ar' ? 'rtl' : 'ltr'}
+    >
       <AmanahGlobalDefs />
-      <SystemStatusBar hasCriticalAlert={alerts.some(a => a.severity === AlertSeverity.CRITICAL)} alertCount={alerts.length} />
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} lang={lang} menuItems={menuItems} />
+      <SystemStatusBar
+        hasCriticalAlert={alerts.some((a) => a.severity === AlertSeverity.CRITICAL)}
+        alertCount={alerts.length}
+      />
+      <Sidebar
+        isOpen={isMenuOpen}
+        onClose={() => setIsMenuOpen(false)}
+        lang={lang}
+        menuItems={menuItems}
+      />
 
       <header className="fixed top-8 left-0 right-0 h-20 px-6 flex items-center justify-between z-[150] bg-white/80 backdrop-blur-2xl border-b border-slate-100 shadow-sm">
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate('/settings')}>
+        <div
+          className="flex items-center gap-3 cursor-pointer"
+          onClick={() => navigate('/settings')}
+        >
           <div className="relative">
-            <img src={currentUser.avatar} className="w-12 h-12 rounded-full border-2 border-white shadow-md object-cover" />
-            <div className="absolute -bottom-1 -left-1 w-6 h-6"><AdminShieldBadge /></div>
+            <img
+              src={currentUser.avatar}
+              className="w-12 h-12 rounded-full border-2 border-white shadow-md object-cover"
+            />
+            <div className="absolute -bottom-1 -left-1 w-6 h-6">
+              <AdminShieldBadge />
+            </div>
           </div>
           <div className="hidden sm:block text-right">
-            <p className="text-[9px] font-black text-slate-400 uppercase leading-none mb-1">Master Admin</p>
+            <p className="text-[9px] font-black text-slate-400 uppercase leading-none mb-1">
+              Master Admin
+            </p>
             <p className="text-xs font-black text-slate-800">{currentUser.name}</p>
           </div>
         </div>
-        <div className="w-24 cursor-pointer transform hover:scale-105 transition-transform" onClick={() => navigate('/')}>
+        <div
+          className="w-24 cursor-pointer transform hover:scale-105 transition-transform"
+          onClick={() => navigate('/')}
+        >
           <AmanahLogo />
         </div>
-        <button onClick={() => setIsMenuOpen(true)} className="p-4 bg-slate-900 text-white rounded-2xl shadow-lg active:scale-90 hover:bg-indigo-600 transition-all">
+        <button
+          onClick={() => setIsMenuOpen(true)}
+          className="p-4 bg-slate-900 text-white rounded-2xl shadow-lg active:scale-90 hover:bg-indigo-600 transition-all"
+        >
           <ICONS.Menu className="w-6 h-6" />
         </button>
       </header>
 
       <main className="pt-40 px-4 pb-48 max-w-7xl mx-auto min-h-screen">
-        <Suspense fallback={<div className="p-10 text-center text-slate-400 font-bold">جاري تحميل الوحدة...</div>}>
+        <Suspense
+          fallback={
+            <div className="p-10 text-center text-slate-400 font-bold">جاري تحميل الوحدة...</div>
+          }
+        >
           <Routes>
-            <Route path="/" element={<DashboardView children={children} alerts={alerts} onTriggerDemo={() => navigate('/simulator')} lang={lang} parentId={currentUser.id} isLoading={isLoadingData} />} />
-            <Route path="/devices" element={<DevicesView children={children} lang={lang} onUpdateDevice={(id, u) => handleUpdateMember(id, 'CHILD', u)} onToggleAppBlock={() => { }} />} />
-            <Route path="/alerts" element={<AlertsView alerts={alerts} theme="light" lang={lang} />} />
-            <Route path="/modes" element={<ModesView modes={modes} children={children} onUpdateModes={setModes} onApplyMode={(c, m) => { }} />} />
-            <Route path="/simulator" element={<SimulatorView children={children} parentId={currentUser.id} lang={lang} />} />
+            <Route
+              path="/"
+              element={
+                <DashboardView
+                  children={children}
+                  alerts={alerts}
+                  onTriggerDemo={() => navigate('/simulator')}
+                  lang={lang}
+                  parentId={currentUser.id}
+                  isLoading={isLoadingData}
+                />
+              }
+            />
+            <Route
+              path="/devices"
+              element={
+                <DevicesView
+                  children={children}
+                  lang={lang}
+                  onUpdateDevice={(id, u) => handleUpdateMember(id, 'CHILD', u)}
+                  onToggleAppBlock={() => {}}
+                />
+              }
+            />
+            <Route
+              path="/alerts"
+              element={<AlertsView alerts={alerts} theme="light" lang={lang} />}
+            />
+            <Route
+              path="/modes"
+              element={
+                <ModesView
+                  modes={modes}
+                  children={children}
+                  onUpdateModes={setModes}
+                  onApplyMode={(c, m) => {}}
+                />
+              }
+            />
+            <Route
+              path="/simulator"
+              element={<SimulatorView children={children} parentId={currentUser.id} lang={lang} />}
+            />
             <Route path="/devlab" element={<DevLabView />} />
             <Route path="/live" element={<LiveMonitorView children={children} lang={lang} />} />
-            <Route path="/vault" element={<EvidenceVaultView records={alerts as any} currentUser={currentUser} onRequestToast={(a) => setActiveToast(a)} isLoading={isLoadingData} />} />
-            <Route path="/pulse" element={<PsychologicalInsightView theme="light" child={children[0]} onAcceptPlan={() => { }} />} />
+            <Route
+              path="/vault"
+              element={
+                <EvidenceVaultView
+                  records={alerts as any}
+                  currentUser={currentUser}
+                  onRequestToast={(a) => setActiveToast(a)}
+                  isLoading={isLoadingData}
+                />
+              }
+            />
+            <Route
+              path="/pulse"
+              element={
+                <PsychologicalInsightView
+                  theme="light"
+                  child={children[0]}
+                  onAcceptPlan={() => {}}
+                />
+              }
+            />
             <Route path="/map" element={<MapView children={children} />} />
-            <Route path="/settings" element={<SettingsView currentUser={currentUser} children={children} lang={lang} onUpdateMember={handleUpdateMember} onDeleteMember={(id, role) => deleteMemberFromDB(id, role)} onAddChild={(data) => addChildToDB(currentUser.id, data)} onAddSupervisor={(data) => inviteSupervisor(currentUser.id, data)} showSuccessToast={(m) => setActiveToast({ id: 'sys-' + Date.now(), childName: 'System', platform: 'Amanah', content: m, category: Category.SAFE, severity: AlertSeverity.LOW, timestamp: new Date(), aiAnalysis: m })} />} />
+            <Route
+              path="/settings"
+              element={
+                <SettingsView
+                  currentUser={currentUser}
+                  children={children}
+                  lang={lang}
+                  onUpdateMember={handleUpdateMember}
+                  onDeleteMember={(id, role) => deleteMemberFromDB(id, role)}
+                  onAddChild={(data) => addChildToDB(currentUser.id, data)}
+                  onAddSupervisor={(data) => inviteSupervisor(currentUser.id, data)}
+                  showSuccessToast={(m) =>
+                    setActiveToast({
+                      id: 'sys-' + Date.now(),
+                      childName: 'System',
+                      platform: 'Amanah',
+                      content: m,
+                      category: Category.SAFE,
+                      severity: AlertSeverity.LOW,
+                      timestamp: new Date(),
+                      aiAnalysis: m,
+                    })
+                  }
+                />
+              }
+            />
           </Routes>
         </Suspense>
       </main>
@@ -281,8 +494,17 @@ const App: React.FC = () => {
         ))}
       </nav>
 
-      {emergencyAlert && <EmergencyOverlay alert={emergencyAlert} onClose={() => setEmergencyAlert(null)} onAction={() => navigate('/vault')} onMinimize={() => handleMinimizeEmergency(emergencyAlert)} />}
-      {activeToast && <NotificationToast alert={activeToast} onClose={() => setActiveToast(null)} />}
+      {emergencyAlert && (
+        <EmergencyOverlay
+          alert={emergencyAlert}
+          onClose={() => setEmergencyAlert(null)}
+          onAction={() => navigate('/vault')}
+          onMinimize={() => handleMinimizeEmergency(emergencyAlert)}
+        />
+      )}
+      {activeToast && (
+        <NotificationToast alert={activeToast} onClose={() => setActiveToast(null)} />
+      )}
     </div>
   );
 };
