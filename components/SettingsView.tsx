@@ -785,11 +785,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
 
           <div className="bg-white p-4 rounded-3xl shadow-lg">
             <QRCodeSVG
-              value={JSON.stringify({
-                type: 'AMANAH_PAIRING',
-                key: currentUser.pairingKey,
-                pid: currentUser.id
-              })}
+              value={`AMANAH_PAIRING:${currentUser.pairingKey}`}
               size={180}
               level="H"
               includeMargin={true}
