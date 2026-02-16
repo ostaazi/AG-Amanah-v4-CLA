@@ -1,0 +1,43 @@
+﻿# Phase Backups Index
+
+## Latest Backups
+- phase6-part63-plan-log-sync-20260215-144906.zip | 2026-02-15 14:49:07 | 6.84 KB
+- phase6-part62-rbac-hardening-hubs-20260215-144835.zip | 2026-02-15 14:48:36 | 10.63 KB
+- phase6-part61-release-prep-checklist-20260215-144656.zip | 2026-02-15 14:46:57 | 0.79 KB
+- phase5-part59-plan-log-sync-20260215-144559.zip | 2026-02-15 14:45:59 | 6.79 KB
+- phase5-part58-hub-regression-tests-20260215-144534.zip | 2026-02-15 14:45:34 | 0.7 KB
+- phase5-part57-plan-progress-sync-20260215-144326.zip | 2026-02-15 14:43:27 | 6.78 KB
+- phase5-part56-command-and-resolution-hubs-20260215-144246.zip | 2026-02-15 14:42:47 | 19.35 KB
+- encoding-fix-plan-20260215-142825.zip | 2026-02-15 14:28:25 | 7.43 KB
+- phase5-part54-progress-log-sync-20260215-061042.zip | 2026-02-15 06:10:42 | 7.43 KB
+- phase5-part53-playbook-arabic-encoding-cleanup-20260215-060916.zip | 2026-02-15 06:09:16 | 9.2 KB
+- phase5-part52-playbook-permission-fallback-20260215-060553.zip | 2026-02-15 06:05:53 | 8.65 KB
+- phase5-part51-pulse-evidence-hardening-20260215-060254.zip | 2026-02-15 06:02:54 | 3.41 KB
+- phase4-part43-mock-domain-regression-20260215-055057.zip | 2026-02-15 05:50:58 | 19.34 KB
+- phase4-part42-mock-ops-domain-20260215-054939.zip | 2026-02-15 05:49:40 | 18.92 KB
+- phase4-part41-playbook-notify-and-pulse-service-20260215-054659.zip | 2026-02-15 05:46:59 | 32.45 KB
+- phase3-part33-pulse-vault-qa-20260215-054456.zip | 2026-02-15 05:44:57 | 12.74 KB
+- phase3-part32-encoding-cleanup-20260215-051500.zip | 2026-02-15 05:15:00 | 35.03 KB
+- phase-permission-playbooks-fix-20260215-050308.zip | 2026-02-15 05:03:08 | 31.79 KB
+- plan-progress-log-refresh-4_20260215-045030.zip | 2026-02-15 04:50:30 | 7.03 KB
+- pulse-playbook-auto-step-sync_20260215-045008.zip | 2026-02-15 04:50:08 | 20.12 KB
+- plan-progress-log-refresh-3_20260215-044647.zip | 2026-02-15 04:46:47 | 7.01 KB
+- proactive-defense-playbook-sync_20260215-044624.zip | 2026-02-15 04:46:24 | 15 KB
+- plan-progress-log-refresh-2_20260215-044516.zip | 2026-02-15 04:45:16 | 6.96 KB
+- live-monitor-deep-control-hardening_20260215-044453.zip | 2026-02-15 04:44:54 | 16.92 KB
+- parent-device-deep-commands_20260214-234500.zip | 2026-02-14 23:45:00 | 1.94 KB
+- plan-progress-log-refresh_20260214-234247.zip | 2026-02-14 23:42:47 | 6.94 KB
+- playbook-action-control_20260214-234218.zip | 2026-02-14 23:42:18 | 3.62 KB
+- deep-actions-qa-regression_20260214-234058.zip | 2026-02-14 23:40:58 | 1.61 KB
+- digital-balance-deep-actions_20260214-233939.zip | 2026-02-14 23:39:39 | 54.67 KB
+- exports-package-download_20260214-232959.zip | 2026-02-14 23:29:59 | 6.5 KB
+- export-package-download_20260214-232807.zip | 2026-02-14 23:28:08 | 6 KB
+- parent-ops-stepup-guard_20260214-232347.zip | 2026-02-14 23:23:47 | 4.58 KB
+- parent-ops-worker-binding_20260214-232220.zip | 2026-02-14 23:22:21 | 5.98 KB
+- workers-backlog-integration_20260214-230828.zip | 2026-02-14 23:08:28 | 3.35 KB
+- qa-regression-tests_20260214-225316.zip | 2026-02-14 22:53:16 | 3.24 KB
+- hardening-rules-indexes_20260214-182329.zip | 2026-02-14 18:23:29 | 1.09 KB
+- upgrade-simplified-files_20260214-182102.zip | 2026-02-14 18:21:02 | 3.69 KB
+- step-up-security_20260214-181642.zip | 2026-02-14 18:16:42 | 36.01 KB
+- wave-ui-3_20260214-180724.zip | 2026-02-14 18:07:24 | 23.75 KB
+- wave-ui-2_20260214-180150.zip | 2026-02-14 18:01:51 | 19.55 KB

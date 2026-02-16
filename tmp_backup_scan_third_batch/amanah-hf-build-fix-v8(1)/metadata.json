@@ -1,0 +1,10 @@
+{
+  "name": "Amanah: Parental Control AI",
+  "version": "1.0.0-stable",
+  "description": "نظام رقابة أبوية متكامل مع محرك فحص بصري محلي، تتبع جغرافي ذكي، وخزنة أدلة جنائية مؤمنة ضد التلاعب.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

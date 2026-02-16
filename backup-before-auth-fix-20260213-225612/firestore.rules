@@ -1,0 +1,75 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(parentId) {
+      return isAuthenticated() && request.auth.uid == parentId;
+    }
+
+    match /parents/{parentId} {
+      allow read, write: if isOwner(parentId);
+
+      // Pairing requests queue (child -> parent approval flow)
+      match /pairingRequests/{requestId} {
+        // Child device creates pending request
+        allow create: if isAuthenticated()
+          && request.resource.data.parentId == parentId
+          && request.resource.data.status == 'PENDING';
+
+        // Parent can read/update/delete requests
+        allow read, update, delete: if isOwner(parentId);
+      }
+    }
+    
+    match /children/{childId} {
+      allow read: if isAuthenticated() && (
+        resource.data.parentId == request.auth.uid || 
+        (resource.data.get('deviceOwnerUid', null) == request.auth.uid)
+      );
+      allow update, delete: if isAuthenticated() && (
+        resource.data.parentId == request.auth.uid ||
+        (resource.data.get('deviceOwnerUid', null) == request.auth.uid)
+      );
+      allow create: if isAuthenticated();
+    }
+
+    match /supervisors/{supervisorId} {
+      allow read: if isAuthenticated() && resource.data.parentId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.parentId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.parentId == request.auth.uid;
+    }
+
+    match /alerts/{alertId} {
+      allow create: if isAuthenticated();
+      allow read: if isAuthenticated() && resource.data.parentId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.parentId == request.auth.uid;
+    }
+
+    match /activities/{activityId} {
+      allow create: if isAuthenticated();
+      allow read: if isAuthenticated() && resource.data.parentId == request.auth.uid;
+    }
+    
+    match /system_configs/{parentId} {
+      allow read, write: if isOwner(parentId);
+    }
+
+    // Pairing key lookup docs, ID == 6-digit key
+    match /pairingKeys/{key} {
+      // Child app reads key doc directly by known ID
+      allow get: if true;
+      allow list: if false;
+
+      // Parent owner creates/rotates/removes keys
+      allow create, update: if isAuthenticated()
+        && request.resource.data.parentId == request.auth.uid;
+      allow delete: if isAuthenticated()
+        && resource.data.parentId == request.auth.uid;
+    }
+  }
+}

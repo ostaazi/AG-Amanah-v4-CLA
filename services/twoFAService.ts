@@ -149,7 +149,7 @@ export async function enable2FA(
 
   const password = getSessionPassword();
   if (!password) {
-    throw new Error('Session expired. Please log in again to enable 2FA.');
+    throw new Error('Session expired. Please log in again to enable two-factor authentication (2FA).');
   }
 
   // Generate backup codes
@@ -201,7 +201,7 @@ export async function verify2FACode(
   // Retrieve encrypted 2FA data
   const twoFADoc = await getDoc(doc(db, 'twoFactorSecrets', parentId));
   if (!twoFADoc.exists() || !twoFADoc.data().enabled) {
-    throw new Error('2FA not enabled for this account');
+    throw new Error('Two-factor authentication (2FA) is not enabled for this account.');
   }
 
   const twoFAData = twoFADoc.data();

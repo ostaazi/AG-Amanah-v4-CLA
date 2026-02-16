@@ -1,0 +1,10 @@
+
+{
+  "name": "Amanah: Parental Control AI",
+  "description": "نظام رقابة أبوية متقدم يستخدم الذكاء الاصطناعي لحماية الأطفال من الابتزاز، التنمر، والمحتوى الحرج مع ميزة الحظر التلقائي الفوري.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

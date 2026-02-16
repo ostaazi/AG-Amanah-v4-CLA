@@ -32,5 +32,9 @@
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false
-  }
+  },
+  "exclude": [
+    "backup-before-auth-fix-*",
+    "**/*.bak"
+  ]
 }

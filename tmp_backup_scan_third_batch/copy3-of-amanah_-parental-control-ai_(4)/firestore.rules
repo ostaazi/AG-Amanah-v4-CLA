@@ -1,0 +1,27 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // قواعد حماية ملفات الآباء (المدراء)
+    match /parents/{parentId} {
+      allow read, write: if request.auth != null && request.auth.uid == parentId;
+    }
+    
+    // قواعد حماية بيانات الأطفال
+    match /children/{childId} {
+      allow read, write: if request.auth != null && (resource == null || resource.data.parentId == request.auth.uid || request.resource.data.parentId == request.auth.uid);
+    }
+
+    // قواعد حماية المشرفين (الأمهات) - هذا هو الجزء المفقود
+    match /supervisors/{supervisorId} {
+      allow read, write: if request.auth != null && (resource == null || resource.data.parentId == request.auth.uid || request.resource.data.parentId == request.auth.uid);
+    }
+
+    // قواعد سجلات التنبيهات والأدلة الجنائية
+    match /alerts/{alertId} {
+      allow read, write: if request.auth != null && (resource == null || resource.data.parentId == request.auth.uid);
+      allow create: if request.auth != null;
+    }
+  }
+}

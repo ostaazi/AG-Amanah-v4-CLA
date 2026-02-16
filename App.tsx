@@ -1,5 +1,5 @@
-import React, { useState, useEffect, Suspense } from 'react';
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, Suspense, useMemo } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   Child,
   MonitoringAlert,
@@ -9,6 +9,7 @@ import {
   UserRole,
   CustomMode,
   PairingRequest,
+  ProactiveDefenseConfig,
 } from './types';
 
 // استيراد المكونات من مساراتها الصحيحة داخل components/
@@ -23,14 +24,28 @@ import PsychologicalInsightView from './components/PsychologicalInsightView';
 import MapView from './components/MapView';
 import ModesView from './components/ModesView';
 import DevLabView from './components/DevLabView';
+import ProactiveDefenseView from './components/ProactiveDefenseView';
+import IncidentsCenterView from './components/IncidentsCenterView';
+import DeviceEnrollmentView from './components/DeviceEnrollmentView';
+import FamilyRolesView from './components/FamilyRolesView';
+import AdvisorView from './components/AdvisorView';
 import SystemStatusBar from './components/SystemStatusBar';
 import NotificationToast from './components/NotificationToast';
 import EmergencyOverlay from './components/EmergencyOverlay';
 import AuthView from './components/AuthView';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import IncidentWarRoom from './components/IncidentWarRoom';
+import ChainOfCustodyView from './components/ChainOfCustodyView';
+import SystemSecurityReportView from './components/SystemSecurityReportView';
+import VisualBenchmarkView from './components/VisualBenchmarkView';
+import SafetyPlaybookHub from './components/SafetyPlaybookHub';
+import ParentOpsConsoleView from './components/parent/ParentOpsConsoleView';
+import CommandCenter from './components/CommandCenter';
+import DeveloperResolutionHub from './components/DeveloperResolutionHub';
 
 import { ICONS, AmanahLogo, AdminShieldBadge, AmanahGlobalDefs, AmanahShield } from './constants';
 import { subscribeToAuthChanges, logoutUser } from './services/authService';
+import { auth } from './services/firebaseConfig';
 import {
   syncParentProfile,
   updateMemberInDB,
@@ -40,12 +55,18 @@ import {
   subscribeToAlerts,
   logUserActivity,
   inviteSupervisor,
+  saveAlertToDB,
   subscribeToPairingRequests,
   approvePairingRequest,
   rejectPairingRequest,
+  sendRemoteCommand,
+  backfillChildDeviceOwnership,
+  rotatePairingKey,
 } from './services/firestoreService';
+import { buildPulseExecutionEvidenceAlert } from './services/pulseExecutionEvidenceService';
 import { translations } from './translations';
 import { MY_DESIGNED_ASSETS, FALLBACK_ASSETS } from './assets';
+import { FEATURE_FLAGS } from './config/featureFlags';
 
 // تعريف المكونات الفرعية داخل الملف لضمان عملها
 const NavLink: React.FC<{ to: string; icon: any; label: string }> = ({ to, icon, label }) => {
@@ -193,6 +214,19 @@ const PairingRequestModal: React.FC<{
   );
 };
 
+const IntegrationPlaceholder: React.FC<{
+  title: string;
+  subtitle: string;
+}> = ({ title, subtitle }) => (
+  <div className="bg-white border border-slate-100 rounded-[2.5rem] shadow-sm p-10 text-center space-y-4">
+    <div className="w-16 h-16 mx-auto rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl">
+      🧩
+    </div>
+    <h3 className="text-2xl font-black text-slate-900">{title}</h3>
+    <p className="text-sm font-bold text-slate-500 max-w-xl mx-auto leading-relaxed">{subtitle}</p>
+  </div>
+);
+
 const App: React.FC = () => {
   const navigate = useNavigate();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -253,21 +287,269 @@ const App: React.FC = () => {
     },
   ]);
 
+  const handleAcceptSuggestedMode = (plan: Partial<CustomMode>) => {
+    const nextMode: CustomMode = {
+      id: plan.id || `mode-${Date.now()}`,
+      name: plan.name || (lang === 'ar' ? 'وضع مخصص' : 'Custom Mode'),
+      icon: plan.icon || '🛡️',
+      color: plan.color || 'bg-indigo-700',
+      allowedApps: plan.allowedApps || [],
+      allowedUrls: plan.allowedUrls || [],
+      blacklistedUrls: plan.blacklistedUrls || [],
+      cameraEnabled: plan.cameraEnabled ?? false,
+      micEnabled: plan.micEnabled ?? true,
+      isInternetCut: plan.isInternetCut ?? false,
+      isScreenDimmed: plan.isScreenDimmed ?? false,
+      isDeviceLocked: plan.isDeviceLocked ?? false,
+      internetStartTime: plan.internetStartTime || '06:00',
+      internetEndTime: plan.internetEndTime || '22:00',
+      activeDays: plan.activeDays || [0, 1, 2, 3, 4, 5, 6],
+      preferredVideoSource: plan.preferredVideoSource || 'screen',
+      preferredAudioSource: plan.preferredAudioSource || 'mic',
+      autoStartLiveStream: plan.autoStartLiveStream ?? false,
+      autoTakeScreenshot: plan.autoTakeScreenshot ?? false,
+    };
+
+    setModes((prev) =>
+      prev.some((mode) => mode.id === nextMode.id)
+        ? prev.map((mode) => (mode.id === nextMode.id ? nextMode : mode))
+        : [...prev, nextMode]
+    );
+    return nextMode.id;
+  };
+
+  const handlePlanExecutionResult = (summary: { done: number; failed: number; skipped: number }) => {
+    setActiveToast({
+      id: `plan-run-${Date.now()}`,
+      childName: 'System',
+      platform: 'Digital Balance',
+      content:
+        lang === 'ar'
+          ? `انتهى التنفيذ التلقائي: ${summary.done} تم، ${summary.skipped} تخطي، ${summary.failed} فشل.`
+          : `Auto execution finished: ${summary.done} done, ${summary.skipped} skipped, ${summary.failed} failed.`,
+      category: Category.SAFE,
+      severity: summary.failed > 0 ? AlertSeverity.MEDIUM : AlertSeverity.LOW,
+      timestamp: new Date(),
+      aiAnalysis:
+        lang === 'ar'
+          ? 'تم تسجيل نتيجة تشغيل خطوات خطة التوازن الرقمي.'
+      : 'Digital balance auto-execution summary was logged.',
+    });
+  };
+
+  const handleSaveExecutionEvidence = async (payload: {
+    childId: string;
+    childName: string;
+    scenarioId: string;
+    scenarioTitle: string;
+    severity: AlertSeverity;
+    dominantPlatform: string;
+    summary: { done: number; failed: number; skipped: number };
+    timeline: Array<{ title: string; detail: string; status: 'done' | 'error' | 'skipped' | 'info'; at: string }>;
+  }) => {
+    const parentId = auth?.currentUser?.uid || currentUser.id;
+    if (!parentId || parentId === 'guest') {
+      throw new Error('Missing parent account id for evidence save');
+    }
+
+    const { compactSummary, alertData } = buildPulseExecutionEvidenceAlert(payload, lang);
+
+    const recordId = await saveAlertToDB(parentId, alertData);
+
+    if (!recordId) {
+      throw new Error('Failed to persist evidence record');
+    }
+
+    setActiveToast({
+      id: `pulse-vault-${Date.now()}`,
+      childName: payload.childName,
+      platform: 'Evidence Vault',
+      content:
+        lang === 'ar'
+          ? 'تم حفظ سجل تنفيذ الخطة داخل الخزنة الجنائية.'
+          : 'Execution timeline saved to forensic vault.',
+      category: Category.SAFE,
+      severity: AlertSeverity.LOW,
+      timestamp: new Date(),
+      aiAnalysis:
+        lang === 'ar'
+          ? `تم حفظ الدليل بالمعرف ${recordId}.`
+          : `Evidence stored with id ${recordId}.`,
+    });
+
+    return recordId;
+  };
+
+  const handleApplyMode = async (childId: string, modeId?: string) => {
+    const targetMode = modes.find((mode) => mode.id === modeId);
+    const targetChild = children.find((child) => child.id === childId);
+    if (!targetMode || !targetChild) return;
+
+    const allowList = new Set(
+      (targetMode.allowedApps || []).map((name) => name.toLowerCase().replace(/\s+/g, ' ').trim())
+    );
+    const previousBlockByApp = new Map(
+      (targetChild.appUsage || []).map((app) => [app.id, !!app.isBlocked])
+    );
+
+    const nextAppUsage = (targetChild.appUsage || []).map((app) => {
+      const appNameNorm = (app.appName || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const shouldBlock = allowList.size === 0 ? true : !allowList.has(appNameNorm);
+      return { ...app, isBlocked: shouldBlock };
+    });
+
+    const changedApps = nextAppUsage.filter((app) => previousBlockByApp.get(app.id) !== app.isBlocked);
+    const patch: Partial<Child> = {
+      deviceLocked: targetMode.isDeviceLocked,
+      cameraBlocked: !targetMode.cameraEnabled,
+      micBlocked: !targetMode.micEnabled,
+      appUsage: nextAppUsage,
+    };
+
+    setChildren((prev) => prev.map((child) => (child.id === childId ? { ...child, ...patch } : child)));
+    await handleUpdateMember(childId, 'CHILD', patch);
+
+    const commandQueue: Promise<any>[] = [sendRemoteCommand(childId, 'lockDevice', targetMode.isDeviceLocked)];
+
+    if (targetMode.blackoutOnApply) {
+      commandQueue.push(
+        sendRemoteCommand(childId, 'lockscreenBlackout', {
+          enabled: true,
+          message:
+            targetMode.blackoutMessage ||
+            (lang === 'ar'
+              ? 'تم قفل الجهاز لدواعي الأمان. يرجى التواصل مع الوالدين.'
+              : 'Device locked for safety. Please contact a parent.'),
+          source: 'mode_apply',
+        })
+      );
+    }
+
+    if (targetMode.enableWalkieTalkieOnApply) {
+      commandQueue.push(
+        sendRemoteCommand(childId, 'walkieTalkieEnable', {
+          enabled: true,
+          source: targetMode.preferredAudioSource || 'mic',
+          sourceTag: 'mode_apply',
+        })
+      );
+    }
+
+    for (const app of changedApps) {
+      commandQueue.push(
+        sendRemoteCommand(childId, 'blockApp', {
+          appId: app.id,
+          appName: app.appName,
+          blocked: app.isBlocked,
+          isBlocked: app.isBlocked,
+          reason: 'mode_apply',
+        })
+      );
+    }
+
+    if (targetMode.autoTakeScreenshot) {
+      commandQueue.push(sendRemoteCommand(childId, 'takeScreenshot', true));
+    }
+
+    if (targetMode.preferredVideoSource) {
+      commandQueue.push(sendRemoteCommand(childId, 'setVideoSource', targetMode.preferredVideoSource));
+    }
+
+    if (targetMode.preferredAudioSource) {
+      commandQueue.push(sendRemoteCommand(childId, 'setAudioSource', targetMode.preferredAudioSource));
+    }
+
+    if (targetMode.autoStartLiveStream) {
+      commandQueue.push(
+        sendRemoteCommand(childId, 'startLiveStream', {
+          videoSource: targetMode.preferredVideoSource || 'screen',
+          audioSource: targetMode.preferredAudioSource || 'mic',
+          source: 'mode_apply',
+        })
+      );
+    }
+
+    const commandResults = await Promise.allSettled(commandQueue);
+    const failedCommands = commandResults.filter((result) => result.status === 'rejected').length;
+
+    setActiveToast({
+      id: `apply-mode-${Date.now()}`,
+      childName: targetChild.name,
+      platform: 'Modes',
+      content:
+        lang === 'ar'
+          ? `تم تطبيق وضع "${targetMode.name}" على ${targetChild.name}.`
+          : `Mode "${targetMode.name}" was applied to ${targetChild.name}.`,
+      category: Category.SAFE,
+      severity: failedCommands > 0 ? AlertSeverity.MEDIUM : AlertSeverity.LOW,
+      timestamp: new Date(),
+      aiAnalysis:
+        failedCommands > 0
+          ? lang === 'ar'
+            ? `نجح ${commandQueue.length - failedCommands} أمر وفشل ${failedCommands}.`
+            : `${commandQueue.length - failedCommands} commands succeeded and ${failedCommands} failed.`
+          : lang === 'ar'
+            ? 'تم تنفيذ جميع أوامر الوضع بنجاح.'
+            : 'All mode commands executed successfully.',
+    });
+  };
+
   const t = translations[lang];
 
-  const menuItems = [
-    { path: '/', label: t.dashboard, icon: <ICONS.Dashboard /> },
-    { path: '/alerts', label: t.alerts, icon: <ICONS.Shield /> },
-    { path: '/modes', label: t.modes, icon: <ICONS.Pulse /> },
-    { path: '/vault', label: t.vault, icon: <ICONS.Vault /> },
-    { path: '/pulse', label: t.pulse, icon: <ICONS.Pulse /> },
-    { path: '/live', label: t.live, icon: <ICONS.LiveCamera /> },
-    { path: '/map', label: t.map, icon: <ICONS.Location /> },
-    { path: '/devices', label: t.devices, icon: <ICONS.Devices /> },
-    { path: '/devlab', label: 'مختبر التطوير', icon: <div className="text-xl">🛠️</div> },
-    { path: '/simulator', label: t.simulator, icon: <ICONS.Rocket /> },
-    { path: '/settings', label: t.settings, icon: <ICONS.Settings /> },
-  ];
+  const menuItems = useMemo(() => {
+    const items: Array<{ path: string; label: string; icon: React.ReactNode }> = [];
+
+    if (FEATURE_FLAGS.dashboard) items.push({ path: '/', label: t.dashboard, icon: <ICONS.Dashboard /> });
+    if (FEATURE_FLAGS.alerts) items.push({ path: '/alerts', label: t.alerts, icon: <ICONS.Shield /> });
+    if (FEATURE_FLAGS.advancedDefense) {
+      items.push({ path: '/defense', label: t.advancedDefense, icon: <ICONS.Shield /> });
+    }
+    if (FEATURE_FLAGS.incidentCenter) {
+      items.push({ path: '/incidents', label: t.incidents, icon: <ICONS.Dashboard /> });
+    }
+    if (FEATURE_FLAGS.deviceEnrollment) {
+      items.push({ path: '/enrollment', label: t.enrollment, icon: <ICONS.Devices /> });
+    }
+    if (FEATURE_FLAGS.familyRoles) {
+      items.push({ path: '/family-roles', label: t.familyRoles, icon: <ICONS.Settings /> });
+    }
+    if (FEATURE_FLAGS.advisor) {
+      items.push({ path: '/advisor', label: t.advisor, icon: <ICONS.Pulse /> });
+    }
+    if (FEATURE_FLAGS.incidentWarRoom) {
+      items.push({ path: '/war-room', label: t.warRoom, icon: <ICONS.ShieldCheck /> });
+    }
+    if (FEATURE_FLAGS.playbookHub) {
+      items.push({ path: '/playbooks', label: t.playbookHub, icon: <ICONS.Command /> });
+    }
+    if (FEATURE_FLAGS.parentOpsConsole) {
+      items.push({ path: '/parent-ops', label: t.parentOps, icon: <ICONS.Command /> });
+    }
+    if (FEATURE_FLAGS.commandCenter && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPERVISOR')) {
+      items.push({ path: '/command-center', label: t.commandCenter, icon: <ICONS.Command /> });
+    }
+    if (FEATURE_FLAGS.forensics) {
+      items.push({ path: '/custody', label: t.custodyChain, icon: <ICONS.Chain /> });
+      items.push({ path: '/security-report', label: t.securityReport, icon: <ICONS.ShieldCheck /> });
+      items.push({ path: '/benchmark', label: t.benchmark, icon: <ICONS.Rocket /> });
+    }
+    if (FEATURE_FLAGS.modes) items.push({ path: '/modes', label: t.modes, icon: <ICONS.Pulse /> });
+    if (FEATURE_FLAGS.evidenceVault) items.push({ path: '/vault', label: t.vault, icon: <ICONS.Vault /> });
+    if (FEATURE_FLAGS.psychologicalPulse) items.push({ path: '/pulse', label: t.pulse, icon: <ICONS.Pulse /> });
+    if (FEATURE_FLAGS.liveMonitor) items.push({ path: '/live', label: t.live, icon: <ICONS.LiveCamera /> });
+    if (FEATURE_FLAGS.geoMap) items.push({ path: '/map', label: t.map, icon: <ICONS.Location /> });
+    if (FEATURE_FLAGS.devices) items.push({ path: '/devices', label: t.devices, icon: <ICONS.Devices /> });
+    if (FEATURE_FLAGS.developerLab && currentUser.role === 'ADMIN') {
+      items.push({ path: '/devlab', label: t.devLab, icon: <ICONS.Settings /> });
+    }
+    if (FEATURE_FLAGS.developerResolutionHub && currentUser.role === 'ADMIN') {
+      items.push({ path: '/dev-resolution', label: t.developerResolution, icon: <ICONS.Settings /> });
+    }
+    if (FEATURE_FLAGS.simulator) items.push({ path: '/simulator', label: t.simulator, icon: <ICONS.Rocket /> });
+    items.push({ path: '/settings', label: t.settings, icon: <ICONS.Settings /> });
+
+    return items;
+  }, [t, currentUser.role]);
 
   const handleUpdateMember = async (id: string, role: UserRole, updates: any) => {
     try {
@@ -283,6 +565,109 @@ const App: React.FC = () => {
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const handleUpdateDefense = async (
+    childId: string,
+    config: ProactiveDefenseConfig
+  ) => {
+    await handleUpdateMember(childId, 'CHILD', { defenseConfig: config });
+  };
+
+  const handleRotatePairingKey = async (): Promise<string | undefined> => {
+    try {
+      const newKey = await rotatePairingKey(currentUser.id);
+      setCurrentUser((prev) => ({
+        ...prev,
+        pairingKey: newKey,
+        pairingKeyExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      }));
+      setActiveToast({
+        id: `pairing-key-${Date.now()}`,
+        childName: 'System',
+        platform: 'Amanah',
+        content: lang === 'ar' ? 'تم تدوير مفتاح الربط بنجاح' : 'Pairing key rotated successfully',
+        category: Category.SAFE,
+        severity: AlertSeverity.LOW,
+        timestamp: new Date(),
+        aiAnalysis: lang === 'ar' ? 'تم إنشاء رمز جديد صالح لمدة 10 دقائق.' : 'A new 10-minute key was generated.',
+      });
+      return newKey;
+    } catch (error) {
+      console.error('Rotate pairing key failed:', error);
+      setActiveToast({
+        id: `pairing-key-error-${Date.now()}`,
+        childName: 'System',
+        platform: 'Amanah',
+        content: lang === 'ar' ? 'فشل تدوير مفتاح الربط' : 'Failed to rotate pairing key',
+        category: Category.SAFE,
+        severity: AlertSeverity.MEDIUM,
+        timestamp: new Date(),
+        aiAnalysis: lang === 'ar' ? 'تحقق من الصلاحيات أو الاتصال ثم أعد المحاولة.' : 'Check permissions/network and retry.',
+      });
+      return undefined;
+    }
+  };
+
+  const handleUpdateDeviceControls = async (childId: string, updates: Partial<Child>) => {
+    await handleUpdateMember(childId, 'CHILD', updates);
+    const child = children.find((c) => c.id === childId);
+    const hasMicOrCameraUpdate =
+      Object.prototype.hasOwnProperty.call(updates, 'micBlocked') ||
+      Object.prototype.hasOwnProperty.call(updates, 'cameraBlocked');
+    const hasPreventInstallUpdate = Object.prototype.hasOwnProperty.call(updates, 'preventAppInstall');
+
+    if (hasMicOrCameraUpdate) {
+      const nextMicBlocked = updates.micBlocked ?? child?.micBlocked ?? false;
+      const nextCameraBlocked = updates.cameraBlocked ?? child?.cameraBlocked ?? false;
+      const shouldBlockHardware = !!(nextMicBlocked || nextCameraBlocked);
+      await sendRemoteCommand(childId, 'blockCameraAndMic', shouldBlockHardware);
+    }
+
+    if (hasPreventInstallUpdate) {
+      setActiveToast({
+        id: 'device-cap-' + Date.now(),
+        childName: 'Amanah AI',
+        platform: 'Device Controls',
+        content: 'Partial support',
+        category: Category.SAFE,
+        severity: AlertSeverity.LOW,
+        timestamp: new Date(),
+        aiAnalysis:
+          'App install prevention depends on Android enterprise/device-owner privileges and may vary by device policy.',
+      } as MonitoringAlert);
+    }
+  };
+
+  const handleToggleAppBlock = async (childId: string, appId: string) => {
+    const child = children.find((c) => c.id === childId);
+    if (!child) return;
+
+    const nextUsage = (child.appUsage || []).map((app) =>
+      app.id === appId ? { ...app, isBlocked: !app.isBlocked } : app
+    );
+
+    await handleUpdateMember(childId, 'CHILD', { appUsage: nextUsage });
+    const targetApp = nextUsage.find((a) => a.id === appId);
+    await sendRemoteCommand(childId, 'blockApp', {
+      appId,
+      appName: targetApp?.appName || '',
+      blocked: !!targetApp?.isBlocked,
+      isBlocked: !!targetApp?.isBlocked,
+    });
+  };
+
+  const handleToggleDeviceLock = async (childId: string, shouldLock: boolean) => {
+    if (shouldLock) {
+      await handleUpdateMember(childId, 'CHILD', { preventDeviceLock: false });
+    }
+    await sendRemoteCommand(childId, 'lockDevice', shouldLock);
+    await sendRemoteCommand(childId, 'lockscreenBlackout', {
+      enabled: shouldLock,
+      message: shouldLock
+        ? 'تم قفل الجهاز لدواعي الأمان. يرجى التواصل مع الوالدين.'
+        : '',
+    });
   };
 
   const handleMinimizeEmergency = (alert: MonitoringAlert) => {
@@ -317,7 +702,19 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated || currentUser.id === 'guest') return;
+    const ownerId = auth?.currentUser?.uid;
+    if (!isAuthenticated || !ownerId) return;
+
+    backfillChildDeviceOwnership(ownerId).catch((e: any) => {
+      const code = e?.code || '';
+      const message = String(e?.message || '');
+      const isPermissionIssue =
+        code === 'permission-denied' || message.includes('Missing or insufficient permissions');
+
+      if (!isPermissionIssue) {
+        console.error('Failed to backfill device ownership', e);
+      }
+    });
 
     let childLoaded = false;
     let alertsLoaded = false;
@@ -328,12 +725,12 @@ const App: React.FC = () => {
       }
     };
 
-    const unsubChildren = subscribeToChildren(currentUser.id, (data) => {
+    const unsubChildren = subscribeToChildren(ownerId, (data) => {
       setChildren(data);
       childLoaded = true;
       checkLoading();
     });
-    const unsubAlerts = subscribeToAlerts(currentUser.id, (data) => {
+    const unsubAlerts = subscribeToAlerts(ownerId, (data) => {
       if (data.length > alerts.length) {
         const latest = data[0];
         const protocol = currentUser.alertProtocol || 'FULL';
@@ -352,7 +749,7 @@ const App: React.FC = () => {
       checkLoading();
     });
 
-    const unsubPairing = subscribeToPairingRequests(currentUser.id, (data) => {
+    const unsubPairing = subscribeToPairingRequests(ownerId, (data) => {
       setPairingRequests(data);
     });
 
@@ -365,7 +762,7 @@ const App: React.FC = () => {
       unsubPairing();
       clearTimeout(safetyTimer);
     };
-  }, [isAuthenticated, currentUser.id, alerts.length, currentUser.alertProtocol]);
+  }, [isAuthenticated, alerts.length, currentUser.alertProtocol]);
 
   if (isAuthChecking)
     return (
@@ -476,17 +873,189 @@ const App: React.FC = () => {
             <Route
               path="/devices"
               element={
-                <DevicesView
-                  children={children}
-                  lang={lang}
-                  onUpdateDevice={(id, u) => handleUpdateMember(id, 'CHILD', u)}
-                  onToggleAppBlock={() => { }}
-                />
+                FEATURE_FLAGS.devices ? (
+                  <DevicesView
+                    children={children}
+                    lang={lang}
+                    onUpdateDevice={handleUpdateDeviceControls}
+                    onToggleAppBlock={handleToggleAppBlock}
+                    onToggleDeviceLock={handleToggleDeviceLock}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
+                )
               }
             />
             <Route
               path="/alerts"
               element={<AlertsView alerts={alerts} theme="light" lang={lang} />}
+            />
+            <Route
+              path="/defense"
+              element={
+                FEATURE_FLAGS.advancedDefense ? (
+                  <ProactiveDefenseView
+                    children={children}
+                    lang={lang}
+                    parentId={currentUser.id}
+                    onUpdateDefense={handleUpdateDefense}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/incidents"
+              element={
+                FEATURE_FLAGS.incidentCenter ? (
+                  <IncidentsCenterView alerts={alerts} children={children} lang={lang} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/enrollment"
+              element={
+                FEATURE_FLAGS.deviceEnrollment ? (
+                  <DeviceEnrollmentView
+                    lang={lang}
+                    currentUser={currentUser}
+                    requests={pairingRequests}
+                    onRotatePairingKey={handleRotatePairingKey}
+                    onApprove={async (request) => {
+                      await approvePairingRequest(currentUser.id, request);
+                    }}
+                    onReject={async (requestId) => {
+                      await rejectPairingRequest(currentUser.id, requestId);
+                    }}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/family-roles"
+              element={
+                FEATURE_FLAGS.familyRoles ? (
+                  <FamilyRolesView
+                    lang={lang}
+                    currentUser={currentUser}
+                    children={children}
+                    onUpdateMember={handleUpdateMember}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/advisor"
+              element={
+                FEATURE_FLAGS.advisor ? (
+                  <AdvisorView lang={lang} children={children} alerts={alerts} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/war-room"
+              element={
+                FEATURE_FLAGS.incidentWarRoom ? (
+                  <IncidentWarRoom
+                    parentId={currentUser.id}
+                    alerts={alerts}
+                    lang={lang}
+                    onOpenVault={() => navigate('/vault')}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/playbooks"
+              element={
+                FEATURE_FLAGS.playbookHub ? (
+                  <SafetyPlaybookHub currentUser={currentUser} lang={lang} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/parent-ops"
+              element={
+                FEATURE_FLAGS.parentOpsConsole ? (
+                  <ParentOpsConsoleView
+                    lang={lang}
+                    currentUser={currentUser}
+                    children={children}
+                    alerts={alerts}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/command-center"
+              element={
+                FEATURE_FLAGS.commandCenter ? (
+                  <ProtectedRoute userRole={currentUser.role} allowedRoles={['ADMIN', 'SUPERVISOR']}>
+                    <CommandCenter
+                      lang={lang}
+                      currentUser={currentUser}
+                      children={children}
+                      alerts={alerts}
+                    />
+                  </ProtectedRoute>
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/custody"
+              element={
+                FEATURE_FLAGS.forensics ? (
+                  <ChainOfCustodyView
+                    parentId={currentUser.id}
+                    incidentId={
+                      alerts.find((a) => a.severity === AlertSeverity.CRITICAL)?.id ||
+                      alerts.find((a) => a.severity === AlertSeverity.HIGH)?.id ||
+                      alerts[0]?.id ||
+                      'incident-demo'
+                    }
+                    lang={lang}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/security-report"
+              element={
+                FEATURE_FLAGS.forensics ? (
+                  <SystemSecurityReportView parentId={currentUser.id} lang={lang} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/benchmark"
+              element={
+                FEATURE_FLAGS.forensics ? (
+                  <VisualBenchmarkView lang={lang} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
             />
             <Route
               path="/modes"
@@ -495,47 +1064,99 @@ const App: React.FC = () => {
                   modes={modes}
                   children={children}
                   onUpdateModes={setModes}
-                  onApplyMode={(c, m) => { }}
+                  onApplyMode={handleApplyMode}
                 />
               }
             />
             <Route
               path="/simulator"
-              element={<SimulatorView children={children} parentId={currentUser.id} lang={lang} />}
+              element={
+                FEATURE_FLAGS.simulator ? (
+                  <SimulatorView children={children} parentId={currentUser.id} lang={lang} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
             />
             <Route
               path="/devlab"
               element={
-                <ProtectedRoute userRole={currentUser.role} allowedRoles={['ADMIN']}>
-                  <DevLabView />
-                </ProtectedRoute>
+                FEATURE_FLAGS.developerLab ? (
+                  <ProtectedRoute userRole={currentUser.role} allowedRoles={['ADMIN']}>
+                    <DevLabView />
+                  </ProtectedRoute>
+                ) : (
+                  <Navigate to="/" replace />
+                )
               }
             />
-            <Route path="/live" element={<LiveMonitorView children={children} lang={lang} />} />
+            <Route
+              path="/dev-resolution"
+              element={
+                FEATURE_FLAGS.developerResolutionHub ? (
+                  <ProtectedRoute userRole={currentUser.role} allowedRoles={['ADMIN']}>
+                    <DeveloperResolutionHub
+                      lang={lang}
+                      currentUser={currentUser}
+                      children={children}
+                      alerts={alerts}
+                    />
+                  </ProtectedRoute>
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/live"
+              element={
+                FEATURE_FLAGS.liveMonitor ? (
+                  <LiveMonitorView children={children} lang={lang} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
             <Route
               path="/vault"
               element={
-                <ProtectedRoute userRole={currentUser.role} allowedRoles={['ADMIN', 'SUPERVISOR']}>
-                  <EvidenceVaultView
-                    records={alerts as any}
-                    currentUser={currentUser}
-                    onRequestToast={(a) => setActiveToast(a)}
-                    isLoading={isLoadingData}
-                  />
-                </ProtectedRoute>
+                FEATURE_FLAGS.evidenceVault ? (
+                  <ProtectedRoute userRole={currentUser.role} allowedRoles={['ADMIN', 'SUPERVISOR']}>
+                    <EvidenceVaultView
+                      records={alerts as any}
+                      currentUser={currentUser}
+                      lang={lang}
+                      onRequestToast={(a) => setActiveToast(a)}
+                      isLoading={isLoadingData}
+                    />
+                  </ProtectedRoute>
+                ) : (
+                  <Navigate to="/" replace />
+                )
               }
             />
             <Route
               path="/pulse"
               element={
-                <PsychologicalInsightView
-                  theme="light"
-                  child={children[0]}
-                  onAcceptPlan={() => { }}
-                />
+                FEATURE_FLAGS.psychologicalPulse ? (
+                  <PsychologicalInsightView
+                    theme="light"
+                    child={children[0]}
+                    alerts={alerts}
+                    onAcceptPlan={handleAcceptSuggestedMode}
+                    onApplyModeToChild={handleApplyMode}
+                    onPlanExecutionResult={handlePlanExecutionResult}
+                    onSaveExecutionEvidence={handleSaveExecutionEvidence}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
+                )
               }
             />
-            <Route path="/map" element={<MapView children={children} />} />
+            <Route
+              path="/map"
+              element={FEATURE_FLAGS.geoMap ? <MapView children={children} /> : <Navigate to="/" replace />}
+            />
             <Route
               path="/settings"
               element={
@@ -598,3 +1219,5 @@ const App: React.FC = () => {
 };
 
 export default App;
+
+

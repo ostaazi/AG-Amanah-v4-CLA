@@ -4,6 +4,10 @@
  * Uses globals from vitest.config.ts (globals: true)
  */
 
+// React 19 act() environment flag to avoid noisy warnings in component tests.
+// @ts-ignore - test-only global
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
 // Mock crypto for Node.js environment
 // @ts-ignore - Mocking crypto for tests (signature mismatch with strict null checks)
 if (!globalThis.crypto) {

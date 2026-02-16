@@ -1,0 +1,17 @@
+
+{
+  "name": "Amanah: Parental Control AI",
+  "short_name": "Amanah",
+  "start_url": "/#/go",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/4140/4140047.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

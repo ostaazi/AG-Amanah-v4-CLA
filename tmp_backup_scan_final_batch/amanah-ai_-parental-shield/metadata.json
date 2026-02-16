@@ -1,0 +1,10 @@
+{
+  "name": "Amanah AI: Parental Shield",
+  "version": "1.2.0-gold",
+  "description": "نظام الرقابة الأبوية الذكي المتكامل - حماية استباقية وتحليل جنائي محلي.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

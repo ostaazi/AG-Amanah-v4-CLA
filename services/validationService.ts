@@ -32,11 +32,68 @@ export const ValidationService = {
     },
 
     validateCommand: (command: string, value: any): { valid: boolean; error?: string } => {
-        const allowedCommands = ['takeScreenshot', 'lockDevice', 'playSiren', 'blockApp'];
+        const allowedCommands = [
+            'takeScreenshot',
+            'lockDevice',
+            'lockscreenBlackout',
+            'playSiren',
+            'blockApp',
+            'cutInternet',
+            'blockCameraAndMic',
+            'notifyParent',
+            'startLiveStream',
+            'stopLiveStream',
+            'setVideoSource',
+            'setAudioSource',
+            'pushToTalk',
+            'walkieTalkieEnable',
+        ];
         if (!allowedCommands.includes(command)) {
             return { valid: false, error: `Invalid command: ${command}` };
         }
-        // value validation could go here
+
+        if (command === 'setVideoSource') {
+            const allowedSources = ['camera_front', 'camera_back', 'screen'];
+            if (!allowedSources.includes(String(value))) {
+                return { valid: false, error: `Invalid video source: ${String(value)}` };
+            }
+        }
+
+        if (command === 'setAudioSource') {
+            const allowedSources = ['mic', 'system'];
+            if (!allowedSources.includes(String(value))) {
+                return { valid: false, error: `Invalid audio source: ${String(value)}` };
+            }
+        }
+
+        if (command === 'startLiveStream' && (typeof value !== 'object' || value === null)) {
+            return { valid: false, error: 'startLiveStream requires config object' };
+        }
+
+        if (command === 'lockscreenBlackout') {
+            if (typeof value !== 'object' || value === null) {
+                return { valid: false, error: 'lockscreenBlackout requires config object' };
+            }
+            if (typeof value.enabled !== 'boolean') {
+                return { valid: false, error: 'lockscreenBlackout.enabled must be boolean' };
+            }
+            if (value.message !== undefined && typeof value.message !== 'string') {
+                return { valid: false, error: 'lockscreenBlackout.message must be string' };
+            }
+        }
+
+        if (command === 'walkieTalkieEnable') {
+            if (typeof value !== 'object' || value === null) {
+                return { valid: false, error: 'walkieTalkieEnable requires config object' };
+            }
+            if (typeof value.enabled !== 'boolean') {
+                return { valid: false, error: 'walkieTalkieEnable.enabled must be boolean' };
+            }
+            if (value.source !== undefined && !['mic', 'system'].includes(String(value.source))) {
+                return { valid: false, error: 'walkieTalkieEnable.source must be mic or system' };
+            }
+        }
+
         return { valid: true };
     },
 

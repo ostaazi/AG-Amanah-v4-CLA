@@ -1,171 +1,112 @@
-rules_version = '2';
-
-/**
- * Amanah Parental Control - Firestore Security Rules
- * Phase 3.1: Security Hardening
- * ===================================================
- *
- * Security Model:
- * - Deny-by-default policy
- * - Role-Based Access Control (RBAC): Parent, Child, Supervisor
- * - Tenant isolation: parents can only access their own data
- * - Immutable audit logs
- * - Input validation via regex rules
- */
-
+﻿rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    /**
-     * Helper Functions
-     */
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Check if the user is the parent owner implies parentId == auth.uid
-    function isParent(parentId) {
+    function isOwner(parentId) {
       return isAuthenticated() && request.auth.uid == parentId;
     }
 
-    // Check if the user is the child owner of the document
-    function isChild(childId) {
-      return isAuthenticated() && request.auth.uid == childId;
+    function requestParentMatchesAuth() {
+      return isAuthenticated()
+        && request.resource.data.parentId is string
+        && request.resource.data.parentId == request.auth.uid;
     }
 
-    // Check if the user is a supervisor for the given parent
-    function isSupervisor(parentId) {
-      return isAuthenticated() &&
-        exists(/databases/$(database)/documents/supervisors/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/supervisors/$(request.auth.uid)).data.parentId == parentId;
+    function resourceParentMatchesAuth() {
+      return isAuthenticated()
+        && resource.data.parentId is string
+        && resource.data.parentId == request.auth.uid;
     }
 
-    function canManageFamily(parentId) {
-      return isParent(parentId) || isSupervisor(parentId);
-    }
-
-    // Validation Helpers
-    function isValidEmail(email) {
-      return email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
-    }
-
-    function isValidId(id) {
-      return id.matches('^[a-zA-Z0-9_-]{1,128}$');
-    }
-
-    /**
-     * Parents Collection
-     * - Parents: Full control over their profile
-     * - Anonymous devices: Read ONLY for pairing (looking up parentId via pairingKey)
-     */
     match /parents/{parentId} {
-      // الوالد له صلاحية كاملة
-      allow read: if isParent(parentId);
-      allow update: if isParent(parentId);
-      allow create: if isAuthenticated() && request.auth.uid == parentId;
-      allow delete: if false;
+      allow read, write: if isOwner(parentId);
 
-      // Phase 4.8.2: Secure Pairing Approval sub-collection
       match /pairingRequests/{requestId} {
-        // Create: Child device (anonymous) can create a request
-        allow create: if isAuthenticated() && 
-          request.resource.data.parentId == parentId &&
-          request.resource.data.status == 'PENDING';
-        
-        // Read: Parent OR the Child device that created the request (poll for status)
-        allow read: if isParent(parentId) || 
-          (isAuthenticated() && request.auth.uid == requestId);
-        
-        // Update: Parent (APROVE/REJECT)
-        allow update: if isParent(parentId);
-        
-        // Delete: Parent only
-        allow delete: if isParent(parentId);
+        allow create: if isAuthenticated()
+          && request.resource.data.parentId == parentId
+          && request.resource.data.status == 'PENDING';
+
+        allow read, update, delete: if isOwner(parentId);
       }
     }
 
-    // Phase 4.8.2: Robust Pairing lookup via Key document
-    match /pairingKeys/{key} {
-      // DEBUG: Allowing public read temporarily to isolate Auth issues
-      allow get: if true;
-    }
-
-    /**
-     * Children Collection
-     * - Parents/Supervisors: Read/Update
-     * - Child: Read ONLY their own config, Create for initial pairing
-     */
     match /children/{childId} {
-      // Read: Parent, Supervisor, or the Child themselves
-      allow read: if canManageFamily(resource.data.parentId) || isChild(childId);
+      allow read: if isAuthenticated() && (
+        resource.data.parentId == request.auth.uid
+        || resource.data.get('deviceOwnerUid', null) == request.auth.uid
+      );
 
-      // Create: Parent or Anonymous child during pairing
-      allow create: if (isParent(request.resource.data.parentId) || isAuthenticated()) && isValidId(childId);
+      allow create: if requestParentMatchesAuth();
 
-      // Update: Parent or Supervisor
-      allow update: if canManageFamily(resource.data.parentId);
+      allow update: if isAuthenticated() && (
+        resource.data.parentId == request.auth.uid
+        || resource.data.get('deviceOwnerUid', null) == request.auth.uid
+        || (
+          resource.data.get('deviceOwnerUid', null) == null
+          && request.resource.data.deviceOwnerUid == request.auth.uid
+          && request.resource.data.parentId == resource.data.parentId
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['deviceOwnerUid'])
+        )
+      );
 
-      // Delete: Parent only
-      allow delete: if isParent(resource.data.parentId);
+      allow delete: if isAuthenticated() && (
+        resource.data.parentId == request.auth.uid
+        || resource.data.get('deviceOwnerUid', null) == request.auth.uid
+      );
     }
 
-    /**
-     * Supervisors Collection
-     */
     match /supervisors/{supervisorId} {
-      allow read: if isParent(resource.data.parentId) || request.auth.uid == supervisorId;
-      allow create: if isParent(request.resource.data.parentId);
-      allow update: if isParent(resource.data.parentId) || request.auth.uid == supervisorId;
-      allow delete: if isParent(resource.data.parentId);
+      allow read: if resourceParentMatchesAuth();
+      allow create: if requestParentMatchesAuth();
+      allow update, delete: if resourceParentMatchesAuth();
     }
 
-    /**
-     * Alerts Collection
-     * - Parents/Supervisors: Read, Resolve
-     * - Children: Create (reporting issues)
-     */
     match /alerts/{alertId} {
-      // Read: Parent or Supervisor
-      allow read: if canManageFamily(resource.data.parentId);
-
-      // Create: Allowed for authenticated users (Child reporting or System)
-      // Must include parentId to associate with family
-      allow create: if isAuthenticated() &&
-        request.resource.data.keys().hasAll(['parentId', 'status']) &&
-        request.resource.data.status == 'NEW';
-
-      // Update: Parent/Supervisor can resolve/dismiss
-      allow update: if canManageFamily(resource.data.parentId);
-
-      // Delete: Parent only
-      allow delete: if isParent(resource.data.parentId);
+      allow create: if isAuthenticated() && request.resource.data.parentId is string;
+      allow read, update, delete: if resourceParentMatchesAuth();
     }
 
-    /**
-     * Activities Collection (Audit Logs)
-     * - Parents/Supervisors: Read
-     * - Children: Create (logging usage)
-     */
     match /activities/{activityId} {
-      allow read: if canManageFamily(resource.data.parentId);
-
-      // Create: Allowed for logging
-      allow create: if isAuthenticated() && request.resource.data.keys().hasAll(['parentId', 'type']);
-
-      // Immutable
-      allow update, delete: if false;
+      allow create: if isAuthenticated() && request.resource.data.parentId is string;
+      allow read: if resourceParentMatchesAuth();
     }
 
-    /**
-     * 2FA Secrets
-     */
+    match /playbooks/{parentId} {
+      allow read, write: if isOwner(parentId);
+    }
+
+    match /custody/{custodyId} {
+      allow create: if requestParentMatchesAuth();
+      allow read, update, delete: if resourceParentMatchesAuth();
+    }
+
+    match /auditLogs/{auditId} {
+      allow create: if requestParentMatchesAuth();
+      allow read, update, delete: if resourceParentMatchesAuth();
+    }
+
+    match /systemPatches/{patchId} {
+      allow create: if requestParentMatchesAuth();
+      allow read, update, delete: if resourceParentMatchesAuth();
+    }
+
+    match /system_configs/{parentId} {
+      allow read, write: if isOwner(parentId);
+    }
+
     match /twoFactorSecrets/{parentId} {
-      allow read, write: if isParent(parentId);
+      allow read, write: if isOwner(parentId);
     }
 
-    // Default Deny
-    match /{document=**} {
-      allow read, write: if false;
+    match /pairingKeys/{key} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if requestParentMatchesAuth();
+      allow update, delete: if resourceParentMatchesAuth();
     }
   }
 }

@@ -1,0 +1,10 @@
+{
+  "name": "Copy4 of Amanah: Parental Control AI",
+  "version": "1.0.0-stable",
+  "description": "النسخة المستقرة الذهبية v1.0 | نظام رقابة أبوية متكامل مع محرك فحص بصري محلي، تتبع جغرافي ذكي، وخزنة أدلة جنائية مؤمنة ضد التلاعب.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

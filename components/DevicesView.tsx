@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Child, AppUsage, ChildLocation } from '../types';
 import { ICONS } from '../constants';
 import { analyzeLocationSafety } from '../services/geminiService';
@@ -8,6 +8,7 @@ interface DevicesViewProps {
   children: Child[];
   onToggleAppBlock: (childId: string, appId: string) => void;
   onUpdateDevice: (childId: string, updates: Partial<Child>) => void;
+  onToggleDeviceLock?: (childId: string, shouldLock: boolean) => Promise<void> | void;
   lang: 'ar' | 'en';
 }
 
@@ -22,11 +23,20 @@ const DevicesView: React.FC<DevicesViewProps> = ({
   children,
   onToggleAppBlock,
   onUpdateDevice,
+  onToggleDeviceLock,
   lang,
 }) => {
-  const t = translations[lang];
-  const [selectedChildId, setSelectedChildId] = useState(children[0]?.id || '');
-  const child = children.find((c) => c.id === selectedChildId) || children[0];
+  const t = (translations as any)?.[lang] ?? (translations as any)?.ar ?? {};
+  const safeChildren = Array.isArray(children) ? children : [];
+  const [selectedChildId, setSelectedChildId] = useState(safeChildren[0]?.id || '');
+  const child = safeChildren.find((c) => c.id === selectedChildId) || safeChildren[0];
+  const childApps: AppUsage[] = Array.isArray(child?.appUsage) ? child.appUsage : [];
+  const batteryLevel = Number.isFinite(child?.batteryLevel as number)
+    ? (child?.batteryLevel as number)
+    : 0;
+  const signalStrength = Number.isFinite(child?.signalStrength as number)
+    ? (child?.signalStrength as number)
+    : 0;
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [locationIntel, setLocationIntel] = useState<{ text: string; mapsLinks: any[] } | null>(
     null
@@ -34,6 +44,8 @@ const DevicesView: React.FC<DevicesViewProps> = ({
 
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({ name: '', nickname: '', avatar: '' });
+  const selectorRef = useRef<HTMLDivElement | null>(null);
+  const [isLockActionLoading, setIsLockActionLoading] = useState(false);
 
   if (!child)
     return <div className="p-10 text-center font-black">لا يوجد أطفال مضافين حالياً.</div>;
@@ -80,6 +92,23 @@ const DevicesView: React.FC<DevicesViewProps> = ({
     setIsEditing(false);
   };
 
+  const scrollDevices = (direction: 'next' | 'prev') => {
+    if (!selectorRef.current) return;
+    const amount = Math.max(220, Math.floor(selectorRef.current.clientWidth * 0.7));
+    const sign = direction === 'next' ? 1 : -1;
+    selectorRef.current.scrollBy({ left: sign * amount, behavior: 'smooth' });
+  };
+
+  const handleDeviceLockAction = async (shouldLock: boolean) => {
+    if (!onToggleDeviceLock) return;
+    setIsLockActionLoading(true);
+    try {
+      await onToggleDeviceLock(child.id, shouldLock);
+    } finally {
+      setIsLockActionLoading(false);
+    }
+  };
+
   return (
     <div
       className="space-y-10 pb-40 animate-in fade-in duration-700"
@@ -87,19 +116,44 @@ const DevicesView: React.FC<DevicesViewProps> = ({
     >
       {/* Child Selector */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar flex-1 items-center">
-          {children.map((c) => (
+        <div className="w-full flex-1 bg-white/70 backdrop-blur-xl border border-slate-100 rounded-[2rem] p-3 shadow-sm">
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <button
+              type="button"
+              aria-label="السابق"
+              onClick={() => scrollDevices(lang === 'ar' ? 'next' : 'prev')}
+              className="h-9 w-9 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors shrink-0"
+            >
+              {lang === 'ar' ? '›' : '‹'}
+            </button>
+            <div className="flex-1 text-center text-[10px] font-black tracking-wide text-slate-400 uppercase">
+              اختر الجهاز
+            </div>
+            <button
+              type="button"
+              aria-label="التالي"
+              onClick={() => scrollDevices(lang === 'ar' ? 'prev' : 'next')}
+              className="h-9 w-9 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors shrink-0"
+            >
+              {lang === 'ar' ? '‹' : '›'}
+            </button>
+          </div>
+          <div
+            ref={selectorRef}
+            className="flex gap-3 overflow-x-auto pb-1 custom-scrollbar items-stretch snap-x snap-mandatory"
+          >
+          {safeChildren.map((c) => (
             <button
               key={c.id}
               onClick={() => {
                 setSelectedChildId(c.id);
                 setLocationIntel(null);
               }}
-              className={`flex items-center gap-4 px-6 py-3.5 rounded-full border-2 transition-all whitespace-nowrap ${selectedChildId === c.id ? 'bg-indigo-600 border-indigo-400 text-white shadow-xl' : 'bg-white border-slate-100 text-slate-500'}`}
+              className={`min-w-[220px] flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-all whitespace-nowrap text-start snap-start ${selectedChildId === c.id ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200 hover:shadow-sm'}`}
             >
               <img
                 src={c.avatar}
-                className="w-12 h-12 rounded-full object-cover shadow-sm border border-white/50"
+                className="w-11 h-11 rounded-xl object-cover shadow-sm border border-white/50 shrink-0"
               />
               <div className="text-right">
                 <span className="font-black text-sm block leading-none">{c.name}</span>
@@ -111,6 +165,7 @@ const DevicesView: React.FC<DevicesViewProps> = ({
               </div>
             </button>
           ))}
+          </div>
         </div>
 
         <div className="bg-slate-900 text-white p-6 rounded-[2.5rem] flex items-center gap-8 shadow-2xl border-b-4 border-indigo-600">
@@ -119,11 +174,11 @@ const DevicesView: React.FC<DevicesViewProps> = ({
             <div className="flex items-center gap-2">
               <div className={`w-8 h-4 rounded-sm border border-white/40 p-0.5 relative`}>
                 <div
-                  className={`h-full ${child.batteryLevel > 20 ? 'bg-emerald-500' : 'bg-red-500'}`}
-                  style={{ width: `${child.batteryLevel}%` }}
+                  className={`h-full ${batteryLevel > 20 ? 'bg-emerald-500' : 'bg-red-500'}`}
+                  style={{ width: `${batteryLevel}%` }}
                 ></div>
               </div>
-              <span className="text-[10px] font-black">{child.batteryLevel}%</span>
+              <span className="text-[10px] font-black">{batteryLevel}%</span>
             </div>
           </div>
           <div className="flex flex-col items-center gap-1">
@@ -132,7 +187,7 @@ const DevicesView: React.FC<DevicesViewProps> = ({
               {[1, 2, 3, 4].map((i) => (
                 <div
                   key={i}
-                  className={`w-1 rounded-full ${child.signalStrength >= i ? 'bg-indigo-500' : 'bg-white/10'}`}
+                    className={`w-1 rounded-full ${signalStrength >= i ? 'bg-indigo-500' : 'bg-white/10'}`}
                   style={{ height: `${i * 25}%` }}
                 ></div>
               ))}
@@ -197,26 +252,30 @@ const DevicesView: React.FC<DevicesViewProps> = ({
                 label="قفل الميكروفون"
                 active={child.micBlocked}
                 icon="🎙️"
+                dir={lang === 'ar' ? 'rtl' : 'ltr'}
                 onToggle={() => onUpdateDevice(child.id, { micBlocked: !child.micBlocked })}
               />
               <HardwareToggle
                 label="قفل الكاميرا"
                 active={child.cameraBlocked}
                 icon="📷"
+                dir={lang === 'ar' ? 'rtl' : 'ltr'}
                 onToggle={() => onUpdateDevice(child.id, { cameraBlocked: !child.cameraBlocked })}
               />
               <HardwareToggle
                 label="منع التثبيت"
                 active={child.preventAppInstall}
                 icon="📲"
+                dir={lang === 'ar' ? 'rtl' : 'ltr'}
                 onToggle={() =>
                   onUpdateDevice(child.id, { preventAppInstall: !child.preventAppInstall })
                 }
               />
               <HardwareToggle
-                label={t.preventLock}
+                label={(t as any).preventLock ?? 'منع قفل الجهاز'}
                 active={child.preventDeviceLock || false}
                 icon="🔓"
+                dir={lang === 'ar' ? 'rtl' : 'ltr'}
                 onToggle={() =>
                   onUpdateDevice(child.id, { preventDeviceLock: !child.preventDeviceLock })
                 }
@@ -228,8 +287,26 @@ const DevicesView: React.FC<DevicesViewProps> = ({
               className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-sm hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 shadow-xl active:scale-95"
             >
               <ICONS.Settings className="w-5 h-5 text-indigo-400" />
-              {t.customizeDevice}
+              {(t as any).customizeDevice ?? 'تخصيص الجهاز'}
             </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => handleDeviceLockAction(true)}
+                disabled={isLockActionLoading}
+                className="py-4 bg-red-600 text-white rounded-2xl font-black text-xs shadow-lg disabled:opacity-50"
+              >
+                {isLockActionLoading ? '...' : 'قفل الجهاز الآن'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeviceLockAction(false)}
+                disabled={isLockActionLoading}
+                className="py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs shadow-lg disabled:opacity-50"
+              >
+                {isLockActionLoading ? '...' : 'إلغاء القفل'}
+              </button>
+            </div>
           </div>
 
           <div className="bg-slate-900 rounded-[3rem] p-8 shadow-2xl text-white relative overflow-hidden h-full flex flex-col justify-between group">
@@ -257,11 +334,11 @@ const DevicesView: React.FC<DevicesViewProps> = ({
             جدار حماية التطبيقات
           </h3>
           <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-4 py-1 rounded-full uppercase">
-            إجمالي {child.appUsage.length} تطبيق مرصود
+            إجمالي {childApps.length} تطبيق مرصود
           </span>
         </div>
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-6">
-          {child.appUsage.map((app) => (
+          {childApps.map((app) => (
             <button
               key={app.id}
               onClick={() => onToggleAppBlock(child.id, app.id)}
@@ -338,7 +415,7 @@ const DevicesView: React.FC<DevicesViewProps> = ({
                     <button
                       key={di.label}
                       onClick={() => setEditData({ ...editData, nickname: di.label })}
-                      className={`p-4 rounded-xl text-2xl bg-slate-50 border-2 transition-all ${editData.nickname.includes(di.label) ? 'border-indigo-500 bg-indigo-50' : 'border-transparent'}`}
+                      className={`p-4 rounded-xl text-2xl bg-slate-50 border-2 transition-all ${String(editData.nickname || '').includes(di.label) ? 'border-indigo-500 bg-indigo-50' : 'border-transparent'}`}
                     >
                       {di.icon}
                     </button>
@@ -350,7 +427,7 @@ const DevicesView: React.FC<DevicesViewProps> = ({
                 onClick={handleSaveEdit}
                 className="w-full py-6 bg-indigo-600 text-white rounded-3xl font-black text-lg shadow-xl active:scale-95 transition-all shadow-indigo-200"
               >
-                {t.saveDeviceSettings}
+                {(t as any).saveDeviceSettings ?? 'حفظ إعدادات الجهاز'}
               </button>
             </div>
           </div>
@@ -365,7 +442,8 @@ const HardwareToggle: React.FC<{
   active: boolean;
   icon: string;
   onToggle: () => void;
-}> = ({ label, active, icon, onToggle }) => (
+  dir?: 'rtl' | 'ltr';
+}> = ({ label, active, icon, onToggle, dir = 'ltr' }) => (
   <div
     onClick={onToggle}
     className={`flex items-center justify-between p-5 rounded-[2.2rem] border-2 cursor-pointer transition-all ${active ? 'bg-red-50 border-red-200 shadow-md' : 'bg-slate-50/50 border-transparent hover:bg-slate-100'}`}
@@ -378,7 +456,7 @@ const HardwareToggle: React.FC<{
       className={`w-12 h-7 rounded-full p-1 transition-all ${active ? 'bg-red-600' : 'bg-slate-300'}`}
     >
       <div
-        className={`w-5 h-5 bg-white rounded-full shadow-lg transition-transform ${active ? (document.dir === 'rtl' ? '-translate-x-5' : 'translate-x-5') : 'translate-x-0'}`}
+        className={`w-5 h-5 bg-white rounded-full shadow-lg transition-transform ${active ? (dir === 'rtl' ? '-translate-x-5' : 'translate-x-5') : 'translate-x-0'}`}
       ></div>
     </div>
   </div>

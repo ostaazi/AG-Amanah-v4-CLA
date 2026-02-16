@@ -1,0 +1,97 @@
+﻿import React, { useState } from 'react';
+import { AlertSeverity, Category } from '../types';
+
+interface SafetyProtocolStudioProps {
+  lang: 'ar' | 'en';
+}
+
+const SafetyProtocolStudio: React.FC<SafetyProtocolStudioProps> = ({ lang }) => {
+  const [title, setTitle] = useState(lang === 'ar' ? 'بروتوكول جديد' : 'New Protocol');
+  const [category, setCategory] = useState<Category>(Category.BULLYING);
+  const [severity, setSeverity] = useState<AlertSeverity>(AlertSeverity.HIGH);
+  const [steps, setSteps] = useState<string[]>([
+    lang === 'ar' ? 'التقاط لقطة شاشة فورية' : 'Capture immediate screenshot',
+    lang === 'ar' ? 'تنبيه الوالدين' : 'Notify parents',
+  ]);
+  const [newStep, setNewStep] = useState('');
+
+  const addStep = () => {
+    const s = newStep.trim();
+    if (!s) return;
+    setSteps((prev) => [...prev, s]);
+    setNewStep('');
+  };
+
+  return (
+    <div
+      className="rounded-[2rem] bg-white border border-slate-100 p-6 shadow-sm space-y-4"
+      dir={lang === 'ar' ? 'rtl' : 'ltr'}
+    >
+      <h4 className="text-xl font-black text-slate-900">
+        {lang === 'ar' ? 'استوديو بروتوكولات الحماية' : 'Safety Protocol Studio'}
+      </h4>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold"
+        />
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value as Category)}
+          className="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold"
+        >
+          <option value={Category.BULLYING}>{Category.BULLYING}</option>
+          <option value={Category.PREDATOR}>{Category.PREDATOR}</option>
+          <option value={Category.SELF_HARM}>{Category.SELF_HARM}</option>
+          <option value={Category.BLACKMAIL}>{Category.BLACKMAIL}</option>
+        </select>
+        <select
+          value={severity}
+          onChange={(e) => setSeverity(e.target.value as AlertSeverity)}
+          className="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold"
+        >
+          <option value={AlertSeverity.MEDIUM}>{AlertSeverity.MEDIUM}</option>
+          <option value={AlertSeverity.HIGH}>{AlertSeverity.HIGH}</option>
+          <option value={AlertSeverity.CRITICAL}>{AlertSeverity.CRITICAL}</option>
+        </select>
+      </div>
+
+      <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+        <p className="text-[11px] font-black text-slate-500 mb-2">
+          {lang === 'ar' ? 'خطوات التنفيذ' : 'Execution Steps'}
+        </p>
+        <div className="space-y-2">
+          {steps.map((step, idx) => (
+            <div
+              key={`${step}-${idx}`}
+              className="text-sm font-bold text-slate-700 bg-white rounded-lg border border-slate-200 p-2"
+            >
+              {idx + 1}. {step}
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex gap-2">
+          <input
+            value={newStep}
+            onChange={(e) => setNewStep(e.target.value)}
+            placeholder={lang === 'ar' ? 'أضف خطوة...' : 'Add step...'}
+            className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-bold"
+          />
+          <button onClick={addStep} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-black">
+            {lang === 'ar' ? 'إضافة' : 'Add'}
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm font-bold text-indigo-700">
+        {lang === 'ar'
+          ? `ملخص: ${title} • ${category} • الحد الأدنى للشدة ${severity}`
+          : `Summary: ${title} • ${category} • min severity ${severity}`}
+      </div>
+    </div>
+  );
+};
+
+export default SafetyProtocolStudio;

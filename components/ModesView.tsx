@@ -43,6 +43,13 @@ const ModesView: React.FC<ModesViewProps> = ({ modes, children, onUpdateModes, o
       internetStartTime: editingMode.internetStartTime || '08:00',
       internetEndTime: editingMode.internetEndTime || '21:00',
       activeDays: editingMode.activeDays || [0, 1, 2, 3, 4, 5, 6],
+      preferredVideoSource: editingMode.preferredVideoSource || 'screen',
+      preferredAudioSource: editingMode.preferredAudioSource || 'mic',
+      autoStartLiveStream: editingMode.autoStartLiveStream ?? false,
+      autoTakeScreenshot: editingMode.autoTakeScreenshot ?? false,
+      blackoutOnApply: editingMode.blackoutOnApply ?? false,
+      blackoutMessage: editingMode.blackoutMessage || '',
+      enableWalkieTalkieOnApply: editingMode.enableWalkieTalkieOnApply ?? false,
     };
 
     // تحديث قائمة الأوضاع (إضافة أو تعديل)
@@ -293,6 +300,127 @@ const ModesView: React.FC<ModesViewProps> = ({ modes, children, onUpdateModes, o
                       الجهاز: {!editingMode.isDeviceLocked ? 'مفتوح' : 'مقفل'}
                     </span>
                   </button>
+                </div>
+              </div>
+              <div className="space-y-6">
+                <label className="text-[11px] font-black text-slate-400 uppercase px-4 tracking-widest block">
+                  إعدادات البث التلقائي
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <p className="text-[11px] font-black text-slate-500 px-1">مصدر الصورة المفضل</p>
+                    <select
+                      value={editingMode.preferredVideoSource || 'screen'}
+                      onChange={(e) =>
+                        setEditingMode({
+                          ...editingMode,
+                          preferredVideoSource: e.target.value as 'camera_front' | 'camera_back' | 'screen',
+                        })
+                      }
+                      className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black text-sm"
+                    >
+                      <option value="camera_front">الكاميرا الأمامية</option>
+                      <option value="camera_back">الكاميرا الخلفية</option>
+                      <option value="screen">شاشة الجهاز</option>
+                    </select>
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-[11px] font-black text-slate-500 px-1">مصدر الصوت المفضل</p>
+                    <select
+                      value={editingMode.preferredAudioSource || 'mic'}
+                      onChange={(e) =>
+                        setEditingMode({
+                          ...editingMode,
+                          preferredAudioSource: e.target.value as 'mic' | 'system',
+                        })
+                      }
+                      className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black text-sm"
+                    >
+                      <option value="mic">الميكروفون</option>
+                      <option value="system">صوت النظام</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button
+                    onClick={() =>
+                      setEditingMode({
+                        ...editingMode,
+                        autoStartLiveStream: !editingMode.autoStartLiveStream,
+                      })
+                    }
+                    className={`p-4 rounded-2xl border-2 transition-all flex items-center justify-between ${
+                      editingMode.autoStartLiveStream
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <span className="text-xl">{editingMode.autoStartLiveStream ? 'ON' : 'OFF'}</span>
+                    <span className="font-black text-xs">تشغيل البث تلقائيًا عند تطبيق الوضع</span>
+                  </button>
+                  <button
+                    onClick={() =>
+                      setEditingMode({
+                        ...editingMode,
+                        autoTakeScreenshot: !editingMode.autoTakeScreenshot,
+                      })
+                    }
+                    className={`p-4 rounded-2xl border-2 transition-all flex items-center justify-between ${
+                      editingMode.autoTakeScreenshot
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <span className="text-xl">{editingMode.autoTakeScreenshot ? 'ON' : 'OFF'}</span>
+                    <span className="font-black text-xs">التقاط لقطة شاشة تلقائيًا</span>
+                  </button>
+                  <button
+                    onClick={() =>
+                      setEditingMode({
+                        ...editingMode,
+                        blackoutOnApply: !editingMode.blackoutOnApply,
+                      })
+                    }
+                    className={`p-4 rounded-2xl border-2 transition-all flex items-center justify-between ${
+                      editingMode.blackoutOnApply
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <span className="text-xl">{editingMode.blackoutOnApply ? 'ON' : 'OFF'}</span>
+                    <span className="font-black text-xs">تفعيل شاشة سوداء برسالة حماية</span>
+                  </button>
+                  <button
+                    onClick={() =>
+                      setEditingMode({
+                        ...editingMode,
+                        enableWalkieTalkieOnApply: !editingMode.enableWalkieTalkieOnApply,
+                      })
+                    }
+                    className={`p-4 rounded-2xl border-2 transition-all flex items-center justify-between ${
+                      editingMode.enableWalkieTalkieOnApply
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <span className="text-xl">{editingMode.enableWalkieTalkieOnApply ? 'ON' : 'OFF'}</span>
+                    <span className="font-black text-xs">تفعيل Walkie-Talkie تلقائيًا</span>
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <p className="text-[11px] font-black text-slate-500 px-1">رسالة شاشة الحجب الوقائي</p>
+                  <input
+                    value={editingMode.blackoutMessage || ''}
+                    onChange={(e) =>
+                      setEditingMode({
+                        ...editingMode,
+                        blackoutMessage: e.target.value,
+                      })
+                    }
+                    placeholder="تم قفل الجهاز لدواعي الأمان. يرجى التواصل مع الوالدين."
+                    className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm"
+                  />
                 </div>
               </div>
             </div>

@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 220 240" role="img"
+  aria-label="Amanah shield icon (Qatar palette, ultra clean serrations)">
+  <defs>
+    <!-- Shield base -->
+    <path id="shieldPathBalanced"
+      d="M90 6
+         C120 14 150 24 172 36
+         C175 38 176 40 176 44
+         L176 112
+         C176 164 142 202 90 224
+         C38 202 4 164 4 112
+         L4 44
+         C4 40 5 38 8 36
+         C30 24 60 14 90 6
+         Z"/>
+
+    <clipPath id="shieldClip">
+      <use href="#shieldPathBalanced"/>
+    </clipPath>
+
+    <!-- Materials -->
+    <linearGradient id="maroonBody" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#B83A60"/>
+      <stop offset="35%" stop-color="#8A1538"/>
+      <stop offset="100%" stop-color="#3A0715"/>
+    </linearGradient>
+
+    <linearGradient id="goldMetal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="#FFF8D8"/>
+      <stop offset="10%"  stop-color="#F7DE8D"/>
+      <stop offset="22%"  stop-color="#D1A23D"/>
+      <stop offset="36%"  stop-color="#FFF2B6"/>
+      <stop offset="50%"  stop-color="#B47E1B"/>
+      <stop offset="64%"  stop-color="#FFE6A0"/>
+      <stop offset="78%"  stop-color="#C69126"/>
+      <stop offset="100%" stop-color="#7A4D0A"/>
+    </linearGradient>
+
+    <linearGradient id="goldInner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.55"/>
+      <stop offset="55%"  stop-color="#F0C96B" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#2A1603" stop-opacity="0.42"/>
+    </linearGradient>
+
+    <linearGradient id="glossSweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="32%"  stop-color="#FFFFFF" stop-opacity="0.12"/>
+      <stop offset="48%"  stop-color="#FFFFFF" stop-opacity="0.34"/>
+      <stop offset="62%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Shadows / highlights -->
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="9" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+
+    <filter id="innerShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feOffset dx="0" dy="3" in="SourceAlpha" result="off"/>
+      <feGaussianBlur in="off" stdDeviation="4" result="blur"/>
+      <feComposite in="blur" in2="SourceAlpha" operator="out" result="innerCut"/>
+      <feColorMatrix in="innerCut" type="matrix"
+        values="0 0 0 0 0
+                0 0 0 0 0
+                0 0 0 0 0
+                0 0 0 0.28 0" result="shadow"/>
+      <feComposite in="shadow" in2="SourceGraphic" operator="over"/>
+    </filter>
+
+    <filter id="goldSpecular" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.2" result="a"/>
+      <feSpecularLighting in="a" surfaceScale="6" specularConstant="0.95" specularExponent="36"
+        lighting-color="#FFFFFF" result="spec">
+        <feDistantLight azimuth="235" elevation="48"/>
+      </feSpecularLighting>
+      <feComposite in="spec" in2="SourceAlpha" operator="in" result="specIn"/>
+      <feMerge>
+        <feMergeNode in="SourceGraphic"/>
+        <feMergeNode in="specIn"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Centered shield -->
+  <g transform="translate(22,6)" filter="url(#softShadow)">
+    <!-- Base maroon -->
+    <use href="#shieldPathBalanced" fill="url(#maroonBody)" filter="url(#innerShadow)"/>
+
+    <!-- Qatar flag: SINGLE PATH (no seam line, no tooth erosion, teeth stay sharp) -->
+    <g clip-path="url(#shieldClip)">
+      <path shape-rendering="geometricPrecision" fill="#FFFFFF" opacity="1"
+        d="M-12 -12 H54 V16
+           L78 29 L54 42
+           L78 55 L54 68
+           L78 81 L54 94
+           L78 107 L54 120
+           L78 133 L54 146
+           L78 159 L54 172
+           L78 185 L54 198
+           L78 211 L54 224
+           L78 237 L54 250
+           V270 H-12 Z"/>
+
+      <!-- Gloss & depth -->
+      <path d="M-35 55 C35 18 120 10 230 70 L230 92 C150 55 55 70 -35 135 Z"
+            fill="url(#glossSweep)" opacity="0.22"/>
+      <rect x="-12" y="-12" width="240" height="270" fill="#000000" opacity="0.04"/>
+    </g>
+
+    <!-- Gold frame -->
+    <use href="#shieldPathBalanced"
+         fill="none"
+         stroke="url(#goldMetal)"
+         stroke-width="10"
+         stroke-linejoin="round"
+         stroke-linecap="round"
+         filter="url(#goldSpecular)"/>
+
+    <!-- Inner bevel -->
+    <path d="M90 14
+             C118 21 144 31 162 41
+             C164 42 166 44 166 47
+             L166 112
+             C166 158 135 191 90 210
+             C45 191 14 158 14 112
+             L14 47
+             C14 44 16 42 18 41
+             C36 31 62 21 90 14
+             Z"
+          fill="none"
+          stroke="url(#goldInner)"
+          stroke-width="4.5"
+          stroke-linejoin="round"
+          stroke-linecap="round"
+          opacity="0.92"/>
+
+    <!-- Extra gloss band -->
+    <g clip-path="url(#shieldClip)">
+      <path d="M-35 55 C35 18 120 10 230 70 L230 92 C150 55 55 70 -35 135 Z"
+            fill="url(#glossSweep)" opacity="0.48"/>
+    </g>
+  </g>
+</svg>
