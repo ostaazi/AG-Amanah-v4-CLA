@@ -414,7 +414,6 @@ export const injectSelectedMockData = async (
   parentId: string,
   domains: MockDataDomain[]
 ): Promise<Record<MockDataDomain, number>> => {
-  ensureMockOpsAllowed('inject mock data');
   if (!db || !parentId) {
     return {
       children: 0,
@@ -426,6 +425,7 @@ export const injectSelectedMockData = async (
       operations: 0,
     };
   }
+  ensureMockOpsAllowed('inject mock data');
 
   const selected = new Set(domains);
   const result: Record<MockDataDomain, number> = {
