@@ -1,11 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ICONS, AdminShieldBadge, AmanahShield } from '../constants';
+import { ICONS } from '../constants';
 import { ParentAccount, Child, FamilyMember, UserRole, AlertProtocolMode } from '../types';
 import { translations } from '../translations';
 import {
+  ContactVerificationDelivery,
   fetchSupervisors,
-  updateMemberInDB,
-  logUserActivity,
   rotatePairingKey,
   getFirebasePhoneVerificationAuth,
   isSmsVerificationGatewayConfigured,
@@ -30,10 +30,10 @@ interface SettingsViewProps {
   currentUser: ParentAccount;
   children: Child[];
   lang: 'ar' | 'en';
-  onUpdateMember: (id: string, type: UserRole, updates: any) => Promise<void>;
+  onUpdateMember: (id: string, type: UserRole, updates: Record<string, unknown>) => Promise<void>;
   onDeleteMember: (id: string, role: UserRole) => Promise<void>;
   onAddChild: (data: Partial<Child>) => Promise<void>;
-  onAddSupervisor: (data: any) => Promise<FamilyMember>;
+  onAddSupervisor: (data: Record<string, unknown>) => Promise<FamilyMember>;
   showSuccessToast: (msg: string) => void;
 }
 
@@ -60,7 +60,7 @@ type ParentContactVerificationState = {
   sentAt: number;
   expiresAt: number;
   verified: boolean;
-  delivery?: 'EMAIL_LINK' | 'PASSWORD_RESET' | 'FIREBASE_PHONE_AUTH' | 'SMS_GATEWAY' | 'DEV_FALLBACK';
+  delivery?: ContactVerificationDelivery;
 };
 
 const createEmptyContactVerificationState = (): ParentContactVerificationState => ({
@@ -73,6 +73,11 @@ const createEmptyContactVerificationState = (): ParentContactVerificationState =
 
 const normalizePhoneInput = (value: string): string => {
   return String(value || '').trim().replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '');
+};
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
 };
 
 const SettingsView: React.FC<SettingsViewProps> = ({
@@ -223,10 +228,10 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         phoneRecaptchaVerifierRef.current = verifier;
         setPhoneRecaptchaReady(true);
         setPhoneRecaptchaError('');
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (!mounted) return;
         setPhoneRecaptchaReady(false);
-        setPhoneRecaptchaError(error?.message || 'Unable to initialize reCAPTCHA.');
+        setPhoneRecaptchaError(getErrorMessage(error, 'Unable to initialize reCAPTCHA.'));
       }
     };
 
@@ -255,7 +260,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
 
       // If no key or expired, rotate
       if (!currentUser.pairingKey || !expires || now > expires) {
-        console.log('Pairing key expired or missing, rotating...');
+        console.warn('Pairing key expired or missing, rotating...');
         try {
           const newKey = await rotatePairingKey(currentUser.id);
           // Update local state is handled by Firestore subscription in App.tsx usually, 

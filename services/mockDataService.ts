@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   addDoc,
   collection,
@@ -351,7 +352,7 @@ const listActivitiesByParent = async (parentId: string) => {
 
 const ensureMockChildren = async (parentId: string, minCount: number) => {
   const snap = await listChildrenByParent(parentId);
-  const mockDocs = snap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
+  const mockDocs = snap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
 
   let created = 0;
   const missing = Math.max(0, minCount - mockDocs.length);
@@ -383,13 +384,13 @@ const ensureMockChildren = async (parentId: string, minCount: number) => {
   }
 
   const refreshed = await listChildrenByParent(parentId);
-  const docs = refreshed.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
+  const docs = refreshed.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
   return { docs, created };
 };
 
 const ensureMockSupervisors = async (parentId: string, minCount: number) => {
   const snap = await listSupervisorsByParent(parentId);
-  const mockDocs = snap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
+  const mockDocs = snap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
 
   let created = 0;
   const missing = Math.max(0, minCount - mockDocs.length);
@@ -455,7 +456,7 @@ export const injectSelectedMockData = async (
   }
 
   if (selected.has('devices')) {
-    const updatePromises = mockChildren.map((childDoc, idx) =>
+    const updatePromises = mockChildren.map((childDoc: any, idx: number) =>
       updateDoc(doc(db, 'children', childDoc.id), {
         status: idx % 2 === 0 ? 'online' : 'offline',
         batteryLevel: 20 + (idx * 17) % 75,
@@ -473,7 +474,7 @@ export const injectSelectedMockData = async (
   }
 
   if (selected.has('timings')) {
-    const updatePromises = mockChildren.map((childDoc, idx) =>
+    const updatePromises = mockChildren.map((childDoc: any, idx: number) =>
       updateDoc(doc(db, 'children', childDoc.id), {
         screenTimeLimit: 90 + idx * 30,
         currentScreenTime: 15 + idx * 10,
@@ -484,7 +485,7 @@ export const injectSelectedMockData = async (
   }
 
   if (selected.has('psychPulse')) {
-    const updatePromises = mockChildren.map((childDoc) =>
+    const updatePromises = mockChildren.map((childDoc: any) =>
       updateDoc(doc(db, 'children', childDoc.id), {
         psychProfile: createMockPsychProfile(),
       })
@@ -592,18 +593,18 @@ export const clearSelectedMockData = async (
   };
 
   const childrenSnap = await listChildrenByParent(parentId);
-  const mockChildren = childrenSnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
+  const mockChildren = childrenSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
 
   if (selected.has('children')) {
     result.children = await runMutationBatch(
-      mockChildren.map((d) => () => deleteDoc(doc(db, 'children', d.id))),
+      mockChildren.map((d: any) => () => deleteDoc(doc(db, 'children', d.id))),
       'clear mock children'
     );
   } else {
     if (selected.has('devices')) {
       result.devices = await runMutationBatch(
         mockChildren.map(
-          (d) => () =>
+          (d: any) => () =>
             updateDoc(doc(db, 'children', d.id), {
               deviceNickname: deleteField(),
               deviceOwnerUid: deleteField(),
@@ -620,7 +621,7 @@ export const clearSelectedMockData = async (
     if (selected.has('timings')) {
       result.timings = await runMutationBatch(
         mockChildren.map(
-          (d) => () =>
+          (d: any) => () =>
             updateDoc(doc(db, 'children', d.id), {
               screenTimeLimit: 0,
               currentScreenTime: 0,
@@ -633,7 +634,7 @@ export const clearSelectedMockData = async (
     if (selected.has('psychPulse')) {
       result.psychPulse = await runMutationBatch(
         mockChildren.map(
-          (d) => () =>
+          (d: any) => () =>
             updateDoc(doc(db, 'children', d.id), {
               psychProfile: deleteField(),
             })
@@ -645,16 +646,16 @@ export const clearSelectedMockData = async (
 
   if (selected.has('eventsAlerts')) {
     const alertsSnap = await listAlertsByParent(parentId);
-    const mockAlerts = alertsSnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
+    const mockAlerts = alertsSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
     const removedAlerts = await runMutationBatch(
-      mockAlerts.map((d) => () => deleteDoc(doc(db, 'alerts', d.id))),
+      mockAlerts.map((d: any) => () => deleteDoc(doc(db, 'alerts', d.id))),
       'clear mock alerts'
     );
 
     const activitiesSnap = await listActivitiesByParent(parentId);
-    const mockActivities = activitiesSnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
+    const mockActivities = activitiesSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
     const removedActivities = await runMutationBatch(
-      mockActivities.map((d) => () => deleteDoc(doc(db, 'activities', d.id))),
+      mockActivities.map((d: any) => () => deleteDoc(doc(db, 'activities', d.id))),
       'clear mock activities'
     );
 
@@ -663,9 +664,9 @@ export const clearSelectedMockData = async (
 
   if (selected.has('supervisors')) {
     const supervisorsSnap = await listSupervisorsByParent(parentId);
-    const mockSup = supervisorsSnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
+    const mockSup = supervisorsSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
     result.supervisors = await runMutationBatch(
-      mockSup.map((d) => () => deleteDoc(doc(db, 'supervisors', d.id))),
+      mockSup.map((d: any) => () => deleteDoc(doc(db, 'supervisors', d.id))),
       'clear mock supervisors'
     );
   }
@@ -694,17 +695,17 @@ export const clearSelectedMockData = async (
 
     const custodyQ = query(collection(db, 'custody'), where('parentId', '==', parentId));
     const custodySnap = await safeGetDocs(custodyQ, 'list mock custody');
-    const mockCustody = custodySnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
+    const mockCustody = custodySnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
     removed += await runMutationBatch(
-      mockCustody.map((d) => () => deleteDoc(doc(db, 'custody', d.id))),
+      mockCustody.map((d: any) => () => deleteDoc(doc(db, 'custody', d.id))),
       'clear mock custody'
     );
 
     const auditQ = query(collection(db, 'auditLogs'), where('parentId', '==', parentId));
     const auditSnap = await safeGetDocs(auditQ, 'list mock audit logs');
-    const mockAudit = auditSnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
+    const mockAudit = auditSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
     removed += await runMutationBatch(
-      mockAudit.map((d) => () => deleteDoc(doc(db, 'auditLogs', d.id))),
+      mockAudit.map((d: any) => () => deleteDoc(doc(db, 'auditLogs', d.id))),
       'clear mock audit logs'
     );
 
@@ -725,7 +726,7 @@ export const injectMockSuite = async (parentId: string) => {
 /**
  * Purge user data (legacy behavior)
  */
-export const clearAllUserData = async (parentId: string) => {
+export const clearAllUserData = async (_parentId: string) => {
   throw new Error('clearAllUserData is disabled. Use clearSelectedMockData instead.');
 };
 

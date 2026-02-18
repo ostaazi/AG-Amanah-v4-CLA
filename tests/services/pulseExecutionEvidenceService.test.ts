@@ -22,7 +22,7 @@ describe('pulseExecutionEvidenceService', () => {
     const timeline = Array.from({ length: 25 }, (_, i) => ({
       title: `Step ${i}`,
       detail: `Detail ${i}`,
-      status: (i % 2 === 0 ? 'done' : 'skipped') as const,
+      status: i % 2 === 0 ? ('done' as const) : ('skipped' as const),
       at: new Date(base + i * 1000).toISOString(),
     })).reverse();
 

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   collection,
   addDoc,
@@ -589,7 +590,7 @@ const sendPhoneVerificationCodeMessage = async (
   }
 
   // Development-safe fallback when no SMS provider endpoint exists.
-  console.info(`[Amanah][DEV_SMS] verification code for ${phone}: ${code}`);
+  console.warn(`[Amanah][DEV_SMS] verification code for ${phone}: ${code}`);
   return 'DEV_FALLBACK';
 };
 

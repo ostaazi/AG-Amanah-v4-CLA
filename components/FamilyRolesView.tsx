@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Child, FamilyMember, ParentAccount, UserRole } from '../types';
 import { fetchSupervisors } from '../services/firestoreService';
 
@@ -53,7 +53,7 @@ const FamilyRolesView: React.FC<FamilyRolesViewProps> = ({
     [lang]
   );
 
-  const loadSupervisors = async () => {
+  const loadSupervisors = useCallback(async () => {
     setIsLoading(true);
     try {
       const data = await fetchSupervisors(currentUser.id);
@@ -61,11 +61,11 @@ const FamilyRolesView: React.FC<FamilyRolesViewProps> = ({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentUser.id]);
 
   useEffect(() => {
-    loadSupervisors();
-  }, [currentUser.id]);
+    void loadSupervisors();
+  }, [loadSupervisors]);
 
   const updateChildRole = async (childId: string, nextRole: UserRole) => {
     const key = `child-${childId}`;
@@ -120,7 +120,9 @@ const FamilyRolesView: React.FC<FamilyRolesViewProps> = ({
                 >
                   <div className="space-y-1">
                     <p className="font-black text-slate-900">{child.name}</p>
-                    <p className="text-xs font-bold text-slate-500">{child.deviceNickname || child.model || '-'}</p>
+                    <p className="text-xs font-bold text-slate-500">
+                      {child.deviceNickname || child.devices?.[0]?.model || '-'}
+                    </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {childRoleOptions.map((roleOption) => (

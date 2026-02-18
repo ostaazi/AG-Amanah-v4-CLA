@@ -34,7 +34,18 @@
     "noUnusedParameters": false
   },
   "exclude": [
+    "node_modules",
+    "dist",
+    "dist-ssr",
+    "android",
+    "android-child",
+    "public",
     "backup-before-auth-fix-*",
+    "tmp_*",
+    "tmp_backup_*",
+    "tmp_restore_*",
+    "tmp_docx_source_extract",
+    "phase_backups",
     "**/*.bak"
   ]
 }

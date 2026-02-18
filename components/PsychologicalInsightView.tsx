@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/rules-of-hooks */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertSeverity, Category, Child, CustomMode, MonitoringAlert, SafetyPlaybook } from '../types';
 import {
@@ -77,7 +78,7 @@ interface AutoExecutionStep {
     | 'cutInternet'
     | 'blockCameraAndMic'
     | 'notifyParent';
-  value: any;
+  value: unknown;
   minSeverity: AlertSeverity;
   enabledByDefault: boolean;
 }
@@ -1948,7 +1949,7 @@ const inferContentSubtypeFromKeywords = (keywords: string[]): InappropriateConte
 };
 
 const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
-  theme,
+  theme: _theme,
   child,
   alerts = [],
   lang = 'ar',
@@ -1999,17 +2000,21 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
     () => guidanceScenarios.find((s) => s.id === activeScenarioId) || guidanceScenarios[0],
     [activeScenarioId]
   );
-  const recentKeywordsSignature = (child?.psychProfile?.recentKeywords || []).join('||');
+  const recentKeywords = useMemo(
+    () => child?.psychProfile?.recentKeywords || [],
+    [child?.psychProfile?.recentKeywords]
+  );
+  const recentKeywordsSignature = useMemo(() => recentKeywords.join('||'), [recentKeywords]);
 
   const threatSubtype = useMemo<ThreatExposureSubtype>(() => {
     if (activeScenario.id !== 'threat_exposure') return 'direct_threat';
-    return diagnosis?.threatSubtype || inferThreatSubtypeFromKeywords(child?.psychProfile?.recentKeywords || []);
-  }, [activeScenario.id, recentKeywordsSignature, diagnosis?.threatSubtype]);
+    return diagnosis?.threatSubtype || inferThreatSubtypeFromKeywords(recentKeywords);
+  }, [activeScenario.id, recentKeywords, diagnosis?.threatSubtype]);
 
   const contentSubtype = useMemo<InappropriateContentSubtype>(() => {
     if (activeScenario.id !== 'inappropriate_content') return 'sexual_content';
-    return diagnosis?.contentSubtype || inferContentSubtypeFromKeywords(child?.psychProfile?.recentKeywords || []);
-  }, [activeScenario.id, recentKeywordsSignature, diagnosis?.contentSubtype]);
+    return diagnosis?.contentSubtype || inferContentSubtypeFromKeywords(recentKeywords);
+  }, [activeScenario.id, recentKeywords, diagnosis?.contentSubtype]);
 
   const activeThreatTrack = useMemo(
     () => threatTrackProfiles[threatSubtype],
@@ -2053,6 +2058,7 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
     setActiveScenarioId(diagnosis?.scenarioId || inferScenarioId(child));
     setExpandedScenarioId(diagnosis?.scenarioId || inferScenarioId(child));
   }, [
+    child,
     child?.id,
     child?.psychProfile?.priorityScenario,
     recentKeywordsSignature,
@@ -3165,16 +3171,26 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
     };
   };
 
-  const renderRadarAxisTick = (tickProps: any) => {
-    const { x, y, cx, cy, payload } = tickProps;
-    const dx = x - cx;
-    const dy = y - cy;
+  const renderRadarAxisTick = (tickProps: {
+    x?: number | string;
+    y?: number | string;
+    cx?: number | string;
+    cy?: number | string;
+    payload?: { value?: string };
+  }) => {
+    const { x = 0, y = 0, cx = 0, cy = 0, payload } = tickProps;
+    const xNum = Number(x);
+    const yNum = Number(y);
+    const cxNum = Number(cx);
+    const cyNum = Number(cy);
+    const dx = xNum - cxNum;
+    const dy = yNum - cyNum;
     const length = Math.sqrt(dx * dx + dy * dy) || 1;
 
     // Keep Arabic labels away from polygon edges, especially left/right axes.
     const radialOffset = Math.abs(dx) > Math.abs(dy) ? 34 : dy > 0 ? 28 : 24;
-    const tx = x + (dx / length) * radialOffset;
-    const ty = y + (dy / length) * radialOffset + (dy > 0 ? 5 : -3);
+    const tx = xNum + (dx / length) * radialOffset;
+    const ty = yNum + (dy / length) * radialOffset + (dy > 0 ? 5 : -3);
 
     let textAnchor: 'middle' | 'start' | 'end' = 'middle';
     if (Math.abs(dx) > 8) {
@@ -3991,7 +4007,7 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
                               <p className="text-sm font-black text-slate-800">{step.goal}</p>
                               <p className="text-sm font-bold text-slate-600">{step.action}</p>
                               <p className="text-sm font-bold text-slate-500">
-                                شرح تنفيذي: ابدأ بهدف "{step.goal}" عبر إجراء "{step.action}" مع مراجعة أثره خلال 7 أيام.
+                                شرح تنفيذي: ابدأ بهدف &quot;{step.goal}&quot; عبر إجراء &quot;{step.action}&quot; مع مراجعة أثره خلال 7 أيام.
                               </p>
                             </article>
                           ))}

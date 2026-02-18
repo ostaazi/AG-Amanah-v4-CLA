@@ -5,11 +5,10 @@
  */
 
 // React 19 act() environment flag to avoid noisy warnings in component tests.
-// @ts-ignore - test-only global
+// @ts-expect-error - test-only global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 // Mock crypto for Node.js environment
-// @ts-ignore - Mocking crypto for tests (signature mismatch with strict null checks)
 if (!globalThis.crypto) {
   globalThis.crypto = {
     getRandomValues: <T extends ArrayBufferView | null>(array: T): T => {

@@ -182,7 +182,7 @@ const buildEntryDigest = (
 
 // ─── In-Memory Last Hash (per parent session) ──────────────────────────────
 
-let lastKnownHash: Record<string, string> = {};
+const lastKnownHash: Record<string, string> = {};
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
