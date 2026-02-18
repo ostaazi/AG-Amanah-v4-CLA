@@ -49,9 +49,15 @@ export interface FamilyMember {
   id: string;
   name: string;
   email?: string;
+  phone?: string;
   role: UserRole;
   avatar: string;
   devices?: Device[];
+  emailVerified?: boolean;
+  phoneVerified?: boolean;
+  inviteStatus?: 'EMAIL_SENT' | 'PENDING' | 'ACCEPTED' | 'FAILED';
+  inviteMethod?: 'EMAIL_LINK' | 'PASSWORD_RESET' | 'CUSTOM_EMAIL';
+  inviteSentAt?: Date | any;
 }
 
 export interface AppUsage {
@@ -163,6 +169,9 @@ export interface ParentFeatureToggles {
   webFiltering?: boolean;
   appBlocking?: boolean;
   chatMonitoring?: boolean;
+  autoLockInAutomation?: boolean;
+  allLocksDisabledPermanently?: boolean;
+  allLocksDisabledUntil?: number;
   advancedDefense?: boolean;
   incidentCenter?: boolean;
   forensicExport?: boolean;

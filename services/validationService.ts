@@ -5,6 +5,8 @@
 
 export const ValidationRules = {
     email: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/,
+    // E.164-like phone numbers (+ and digits, 8-15 digits)
+    phone: /^\+?[1-9]\d{7,14}$/,
     // 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char
     password: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/,
     // Alphanumeric, hyphens, underscores, 1-128 chars
@@ -16,6 +18,10 @@ export const ValidationRules = {
 export const ValidationService = {
     isValidEmail: (email: string): boolean => {
         return ValidationRules.email.test(email);
+    },
+
+    isValidPhoneNumber: (phone: string): boolean => {
+        return ValidationRules.phone.test(phone);
     },
 
     isValidPassword: (password: string): boolean => {

@@ -5,9 +5,17 @@ interface DeviceCommandControlProps {
   lang: 'ar' | 'en';
   children: Child[];
   onSendCommand: (childId: string, command: string, payload?: any) => Promise<void>;
+  allLocksDisabled?: boolean;
+  lockDisableLabel?: string;
 }
 
-const DeviceCommandControl: React.FC<DeviceCommandControlProps> = ({ lang, children, onSendCommand }) => {
+const DeviceCommandControl: React.FC<DeviceCommandControlProps> = ({
+  lang,
+  children,
+  onSendCommand,
+  allLocksDisabled = false,
+  lockDisableLabel = '',
+}) => {
   const [childId, setChildId] = useState(children[0]?.id || '');
   const [busy, setBusy] = useState(false);
   const [blackoutMessage, setBlackoutMessage] = useState(
@@ -45,7 +53,7 @@ const DeviceCommandControl: React.FC<DeviceCommandControlProps> = ({ lang, child
       </select>
 
       <div className="grid grid-cols-2 gap-2">
-        <button onClick={() => run('lockDevice', true)} disabled={busy} className="py-2 rounded-xl bg-slate-900 text-white text-sm font-black disabled:opacity-50">
+        <button onClick={() => run('lockDevice', true)} disabled={busy || allLocksDisabled} className="py-2 rounded-xl bg-slate-900 text-white text-sm font-black disabled:opacity-50">
           {lang === 'ar' ? 'قفل الجهاز' : 'Lock Device'}
         </button>
         <button onClick={() => run('takeScreenshot', true)} disabled={busy} className="py-2 rounded-xl bg-indigo-600 text-white text-sm font-black disabled:opacity-50">
@@ -69,7 +77,7 @@ const DeviceCommandControl: React.FC<DeviceCommandControlProps> = ({ lang, child
               source: 'parent_ops_manual',
             })
           }
-          disabled={busy}
+          disabled={busy || allLocksDisabled}
           className="py-2 rounded-xl bg-violet-600 text-white text-sm font-black disabled:opacity-50"
         >
           {lang === 'ar' ? 'شاشة حجب سوداء' : 'Blackout Screen'}
@@ -94,6 +102,14 @@ const DeviceCommandControl: React.FC<DeviceCommandControlProps> = ({ lang, child
         className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold"
         placeholder={lang === 'ar' ? 'رسالة شاشة الحجب...' : 'Blackout message...'}
       />
+      {allLocksDisabled && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-black text-rose-700">
+          {lockDisableLabel ||
+            (lang === 'ar'
+              ? 'تعطيل جميع الأقفال مفعل من الإعدادات.'
+              : 'All lock actions are disabled from settings.')}
+        </div>
+      )}
     </div>
   );
 };

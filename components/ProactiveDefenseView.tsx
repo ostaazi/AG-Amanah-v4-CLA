@@ -15,6 +15,8 @@ interface ProactiveDefenseViewProps {
   children: Child[];
   lang: 'ar' | 'en';
   parentId: string;
+  autoLockInAutomationEnabled?: boolean;
+  allLocksDisabled?: boolean;
   onUpdateDefense: (childId: string, config: ProactiveDefenseConfig) => Promise<void> | void;
 }
 
@@ -41,6 +43,8 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
   children,
   lang,
   parentId,
+  autoLockInAutomationEnabled = true,
+  allLocksDisabled = false,
   onUpdateDefense,
 }) => {
   const [selectedChildId, setSelectedChildId] = useState(children[0]?.id || '');
@@ -57,8 +61,11 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
 
   const config = selectedChild?.defenseConfig || defaultDefenseConfig;
   const actions = useMemo(
-    () => getDefenseActionsWithPlaybooks(selectedCategory, selectedSeverity, playbooks),
-    [playbooks, selectedCategory, selectedSeverity]
+    () =>
+      getDefenseActionsWithPlaybooks(selectedCategory, selectedSeverity, playbooks, {
+        allowAutoLock: autoLockInAutomationEnabled && !allLocksDisabled,
+      }),
+    [allLocksDisabled, autoLockInAutomationEnabled, playbooks, selectedCategory, selectedSeverity]
   );
 
   useEffect(() => {
@@ -99,6 +106,14 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
     textProtocol: lang === 'ar' ? 'استجابة التهديد النصي' : 'Text Threat Protocol',
     visualProtocol: lang === 'ar' ? 'استجابة التهديد البصري' : 'Visual Threat Protocol',
     autoMessage: lang === 'ar' ? 'رسالة الردع' : 'Deterrence Message',
+    autoLockDisabledNote:
+      lang === 'ar'
+        ? 'القفل التلقائي معطل من الإعدادات. ستستمر بقية أوامر الحماية.'
+        : 'Automatic lock is disabled from settings. Other protection actions remain active.',
+    allLocksDisabledNote:
+      lang === 'ar'
+        ? 'تم تعطيل جميع الأقفال مؤقتًا/دائمًا من الإعدادات. لن يتم إرسال أي أوامر قفل.'
+        : 'All locks are disabled from settings (temporary/permanent). No lock commands will be sent.',
   };
 
   if (!selectedChild) {
@@ -321,6 +336,16 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
 
         <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 space-y-3">
           <p className="font-black text-slate-700">Suggested Actions</p>
+          {allLocksDisabled && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-black text-rose-700">
+              {t.allLocksDisabledNote}
+            </div>
+          )}
+          {!allLocksDisabled && !autoLockInAutomationEnabled && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-black text-amber-700">
+              {t.autoLockDisabledNote}
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {actions.map((action) => (
               <div

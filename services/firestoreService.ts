@@ -14,6 +14,19 @@ import {
   orderBy,
   limit,
 } from 'firebase/firestore';
+import { getApps, initializeApp } from 'firebase/app';
+import {
+  ActionCodeSettings,
+  ApplicationVerifier,
+  Auth,
+  PhoneAuthProvider,
+  getAuth,
+  sendPasswordResetEmail,
+  sendSignInLinkToEmail,
+  signInWithCredential,
+  signInWithPhoneNumber,
+  signOut,
+} from 'firebase/auth';
 import { auth, db } from './firebaseConfig';
 import {
   Child,
@@ -31,6 +44,29 @@ import {
 } from '../types';
 import { ValidationService } from './validationService';
 
+export type ContactVerificationChannel = 'email' | 'phone';
+export type ContactVerificationDelivery =
+  | 'EMAIL_LINK'
+  | 'PASSWORD_RESET'
+  | 'CUSTOM_EMAIL'
+  | 'FIREBASE_PHONE_AUTH'
+  | 'SMS_GATEWAY'
+  | 'DEV_FALLBACK';
+
+export interface ContactVerificationDispatch {
+  channel: ContactVerificationChannel;
+  target: string;
+  code: string;
+  verificationId?: string;
+  sentAt: number;
+  expiresAt: number;
+  delivery: ContactVerificationDelivery;
+}
+
+export interface ContactVerificationOptions {
+  phoneAppVerifier?: ApplicationVerifier;
+}
+
 const CHILDREN_COLLECTION = 'children';
 const PARENTS_COLLECTION = 'parents';
 const ALERTS_COLLECTION = 'alerts';
@@ -42,6 +78,629 @@ const AUDIT_LOGS_COLLECTION = 'auditLogs';
 const SYSTEM_PATCHES_COLLECTION = 'systemPatches';
 const PAIRING_REQUESTS_SUBCOLLECTION = 'pairingRequests';
 const PAIRING_KEYS_COLLECTION = 'pairingKeys';
+
+const isLocalInviteHost = (value: string): boolean => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return true;
+
+  try {
+    const parsed = new URL(normalized.includes('://') ? normalized : `https://${normalized}`);
+    return (
+      parsed.hostname === 'localhost' ||
+      parsed.hostname === '127.0.0.1' ||
+      parsed.hostname === '::1'
+    );
+  } catch {
+    return (
+      normalized.includes('localhost') ||
+      normalized.includes('127.0.0.1') ||
+      normalized.includes('::1')
+    );
+  }
+};
+
+const ensureTrailingSlash = (value: string): string => (value.endsWith('/') ? value : `${value}/`);
+
+const appendVerificationCodeToContinueUrl = (
+  code: string,
+  channel: ContactVerificationChannel
+): string => {
+  const base = resolveCoParentInviteContinueUrl();
+  try {
+    const url = new URL(base);
+    url.searchParams.set('vc', code);
+    url.searchParams.set('vch', channel);
+    url.searchParams.set('purpose', 'profile_contact_update');
+    return url.toString();
+  } catch {
+    const separator = base.includes('?') ? '&' : '?';
+    return `${base}${separator}vc=${encodeURIComponent(code)}&vch=${encodeURIComponent(channel)}&purpose=profile_contact_update`;
+  }
+};
+
+const resolveCoParentInviteContinueUrl = (): string => {
+  const envUrl = String(import.meta.env.VITE_CO_PARENT_INVITE_CONTINUE_URL || '').trim();
+  if (envUrl && !isLocalInviteHost(envUrl)) {
+    return ensureTrailingSlash(envUrl);
+  }
+
+  if (typeof window !== 'undefined' && window.location?.origin && !isLocalInviteHost(window.location.origin)) {
+    return ensureTrailingSlash(window.location.origin);
+  }
+
+  const authDomain = String(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '').trim();
+  if (authDomain && !isLocalInviteHost(authDomain)) {
+    return ensureTrailingSlash(`https://${authDomain}`);
+  }
+
+  return 'https://amanah-protect.firebaseapp.com/';
+};
+
+const mapInviteEmailError = (error: any): string => {
+  const code = String(error?.code || '');
+  switch (code) {
+    case 'auth/invalid-email':
+      return 'Invalid invitation email address.';
+    case 'auth/operation-not-allowed':
+      return 'Required authentication provider is disabled in Firebase Auth.';
+    case 'auth/unauthorized-continue-uri':
+      return 'Invite URL is not authorized in Firebase Auth settings.';
+    case 'auth/quota-exceeded':
+      return 'Firebase email quota exceeded. Please try later.';
+    case 'auth/too-many-requests':
+      return 'Too many invite attempts. Please try again later.';
+    case 'auth/network-request-failed':
+      return 'Network error while sending invitation email.';
+    default:
+      return error?.message || 'Failed to send invitation email.';
+  }
+};
+
+const isEmailLinkDisabledError = (error: any): boolean => {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+  return code === 'auth/operation-not-allowed' || message.includes('email-link sign-in is disabled');
+};
+
+const generateInviteTempPassword = (): string => {
+  const rand = Math.random().toString(36).slice(2);
+  const stamp = Date.now().toString(36);
+  return `Ama!${rand}${stamp}#`;
+};
+
+const ensureEmailPasswordAccountForInvite = async (email: string): Promise<void> => {
+  const apiKey = String(import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error('Missing Firebase API key for invite fallback.');
+  }
+
+  const response = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password: generateInviteTempPassword(),
+        returnSecureToken: false,
+      }),
+    }
+  );
+
+  if (response.ok) return;
+
+  const payload = await response.json().catch(() => ({}));
+  const remoteCode = String(payload?.error?.message || '');
+
+  if (remoteCode === 'EMAIL_EXISTS') return;
+  if (remoteCode === 'OPERATION_NOT_ALLOWED') {
+    throw new Error('Email/password sign-in is disabled in Firebase Auth.');
+  }
+  if (remoteCode === 'TOO_MANY_ATTEMPTS_TRY_LATER') {
+    throw new Error('Too many auth attempts. Please try again later.');
+  }
+
+  throw new Error(`Failed to prepare invitation account (${remoteCode || response.status}).`);
+};
+
+const sendPasswordResetInviteEmail = async (email: string): Promise<void> => {
+  if (!auth) {
+    throw new Error('Firebase Auth is not initialized.');
+  }
+
+  await ensureEmailPasswordAccountForInvite(email);
+
+  const actionCodeSettings: ActionCodeSettings = {
+    url: resolveCoParentInviteContinueUrl(),
+    handleCodeInApp: false,
+  };
+
+  try {
+    await sendPasswordResetEmail(auth, email, actionCodeSettings);
+  } catch (error: any) {
+    throw new Error(mapInviteEmailError(error));
+  }
+};
+
+const resolveEmailWebhookUrl = (): string => {
+  return String(import.meta.env.VITE_EMAIL_INVITATION_WEBHOOK_URL || '').trim();
+};
+
+const resolveEmailWebhookToken = (): string => {
+  return String(import.meta.env.VITE_EMAIL_INVITATION_WEBHOOK_TOKEN || '').trim();
+};
+
+const sendViaEmailWebhook = async (
+  email: string,
+  inviterName?: string
+): Promise<void> => {
+  const webhookUrl = resolveEmailWebhookUrl();
+  if (!webhookUrl) throw new Error('Email webhook URL not configured.');
+
+  const token = resolveEmailWebhookToken();
+  const appUrl = resolveCoParentInviteContinueUrl();
+
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ email, inviterName: inviterName || '', appUrl }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.error || `Email webhook error (${response.status})`);
+  }
+};
+
+const sendCoParentInvitationEmail = async (
+  email: string,
+  inviterName?: string
+): Promise<'EMAIL_LINK' | 'PASSWORD_RESET' | 'CUSTOM_EMAIL'> => {
+  // Try custom email webhook first (avoids spam issues with Firebase emails)
+  const webhookUrl = resolveEmailWebhookUrl();
+  if (webhookUrl) {
+    try {
+      await sendViaEmailWebhook(email, inviterName);
+      return 'CUSTOM_EMAIL';
+    } catch (webhookError: any) {
+      console.warn('[invite] Email webhook failed, falling back to Firebase:', webhookError?.message);
+    }
+  }
+
+  // Fallback: Firebase email methods
+  if (!auth) {
+    throw new Error('Firebase Auth is not initialized.');
+  }
+
+  const actionCodeSettings: ActionCodeSettings = {
+    url: resolveCoParentInviteContinueUrl(),
+    handleCodeInApp: true,
+  };
+
+  try {
+    await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+    return 'EMAIL_LINK';
+  } catch (error: any) {
+    if (isEmailLinkDisabledError(error)) {
+      await sendPasswordResetInviteEmail(email);
+      return 'PASSWORD_RESET';
+    }
+    throw new Error(mapInviteEmailError(error));
+  }
+};
+
+const resolveConfiguredSmsVerificationWebhook = (): string => {
+  return String(import.meta.env.VITE_SMS_VERIFICATION_WEBHOOK_URL || '').trim();
+};
+
+const resolveSmsVerificationWebhook = (): string => {
+  const configured = resolveConfiguredSmsVerificationWebhook();
+  if (configured) {
+    return configured;
+  }
+
+  if (typeof window !== 'undefined') {
+    const host = String(window.location?.hostname || '').toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      return 'http://localhost:8787/sms/verification';
+    }
+  }
+
+  return '';
+};
+
+const resolveSmsVerificationToken = (): string => {
+  return String(import.meta.env.VITE_SMS_VERIFICATION_WEBHOOK_TOKEN || '').trim();
+};
+
+const shouldPreferSmsGatewayBeforeFirebase = (): boolean => {
+  const raw = String(import.meta.env.VITE_PHONE_VERIFICATION_PREFER_GATEWAY || '')
+    .trim()
+    .toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+};
+
+const resolveSmsTextbeltKey = (): string => {
+  return String(import.meta.env.VITE_SMS_TEXTBELT_KEY || '').trim();
+};
+
+const PHONE_VERIFICATION_APP_NAME = 'amanah-phone-verification';
+
+const resolveFirebaseClientConfig = () => {
+  const apiKey = String(import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
+  const authDomain = String(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '').trim();
+  const projectId = String(import.meta.env.VITE_FIREBASE_PROJECT_ID || '').trim();
+  const appId = String(import.meta.env.VITE_FIREBASE_APP_ID || '').trim();
+  const storageBucket = String(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim();
+  const messagingSenderId = String(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '').trim();
+
+  if (!apiKey || !authDomain || !projectId || !appId) {
+    throw new Error('Firebase client config is incomplete for phone verification.');
+  }
+
+  return {
+    apiKey,
+    authDomain,
+    projectId,
+    appId,
+    storageBucket,
+    messagingSenderId,
+  };
+};
+
+const getPhoneVerificationAuth = (): Auth => {
+  const existing = getApps().find((app) => app.name === PHONE_VERIFICATION_APP_NAME);
+  const phoneApp = existing || initializeApp(resolveFirebaseClientConfig(), PHONE_VERIFICATION_APP_NAME);
+  return getAuth(phoneApp);
+};
+
+export const getFirebasePhoneVerificationAuth = (): Auth => {
+  return getPhoneVerificationAuth();
+};
+
+const mapPhoneVerificationError = (error: any): string => {
+  const code = String(error?.code || '');
+  switch (code) {
+    case 'auth/billing-not-enabled':
+      return 'Firebase SMS requires billing. Configure a fallback SMS gateway (webhook/Textbelt) to send real messages without upgrading Firebase.';
+    case 'auth/invalid-app-credential':
+      return 'Invalid app credential for Firebase Phone Auth. Verify Authorized domains (localhost/127.0.0.1), API key referrer restrictions, and that your Web app Firebase config belongs to this project.';
+    case 'auth/unauthorized-domain':
+      return 'Current domain is not authorized in Firebase Auth. Add this domain in Authentication > Settings > Authorized domains.';
+    case 'auth/operation-not-allowed':
+      return 'Phone provider is disabled in Firebase Auth. Enable Phone in Sign-in method.';
+    case 'auth/invalid-phone-number':
+      return 'Invalid phone number format.';
+    case 'auth/captcha-check-failed':
+      return 'reCAPTCHA verification failed. Retry and complete the challenge.';
+    case 'auth/too-many-requests':
+      return 'Too many SMS attempts. Please wait and try again later.';
+    case 'auth/quota-exceeded':
+      return 'Firebase SMS quota exceeded. Try again later.';
+    case 'auth/network-request-failed':
+      return 'Network error while contacting Firebase Auth.';
+    default:
+      return error?.message || 'Failed to send/verify phone code with Firebase.';
+  }
+};
+
+export const isSmsVerificationGatewayConfigured = (): boolean => {
+  return Boolean(resolveSmsVerificationWebhook() || resolveSmsTextbeltKey());
+};
+
+const normalizePhoneForVerification = (phone: string): string => {
+  const trimmed = String(phone || '').trim();
+  if (!trimmed) return '';
+  // Keep only leading + and digits to avoid format mismatches.
+  return trimmed.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '');
+};
+
+const generateVerificationCode = (): string => {
+  return String(Math.floor(100000 + Math.random() * 900000));
+};
+
+const sendEmailVerificationCodeMessage = async (
+  email: string,
+  code: string
+): Promise<'EMAIL_LINK' | 'PASSWORD_RESET'> => {
+  if (!auth) {
+    throw new Error('Firebase Auth is not initialized.');
+  }
+
+  const continueUrl = appendVerificationCodeToContinueUrl(code, 'email');
+  const signInLinkSettings: ActionCodeSettings = {
+    url: continueUrl,
+    handleCodeInApp: true,
+  };
+
+  try {
+    await sendSignInLinkToEmail(auth, email, signInLinkSettings);
+    return 'EMAIL_LINK';
+  } catch (error: any) {
+    if (!isEmailLinkDisabledError(error)) {
+      throw new Error(mapInviteEmailError(error));
+    }
+  }
+
+  await ensureEmailPasswordAccountForInvite(email);
+
+  const resetSettings: ActionCodeSettings = {
+    url: continueUrl,
+    handleCodeInApp: false,
+  };
+  try {
+    await sendPasswordResetEmail(auth, email, resetSettings);
+    return 'PASSWORD_RESET';
+  } catch (error: any) {
+    throw new Error(mapInviteEmailError(error));
+  }
+};
+
+const sendPhoneVerificationCodeViaTextbelt = async (
+  phone: string,
+  code: string
+): Promise<void> => {
+  const textbeltKey = resolveSmsTextbeltKey();
+  if (!textbeltKey) {
+    throw new Error('Textbelt key is not configured.');
+  }
+
+  const message = `Amanah verification code: ${code}. Valid for 10 minutes.`;
+  const body = new URLSearchParams({
+    phone,
+    message,
+    key: textbeltKey,
+  });
+
+  const response = await fetch('https://textbelt.com/text', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+    },
+    body: body.toString(),
+  });
+
+  const raw = await response.text().catch(() => '');
+  let payload: any = null;
+  try {
+    payload = raw ? JSON.parse(raw) : null;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok || !payload?.success) {
+    const details = String(payload?.error || payload?.message || raw || `HTTP ${response.status}`).trim();
+    throw new Error(`Textbelt SMS provider rejected the request. ${details}`);
+  }
+};
+
+const sendPhoneVerificationCodeMessage = async (
+  phone: string,
+  code: string
+): Promise<'SMS_GATEWAY' | 'DEV_FALLBACK'> => {
+  const providerErrors: string[] = [];
+
+  const configuredWebhook = resolveConfiguredSmsVerificationWebhook();
+  const webhook = resolveSmsVerificationWebhook();
+  const isImplicitLocalDefaultWebhook =
+    !configuredWebhook && webhook === 'http://localhost:8787/sms/verification';
+  if (webhook) {
+    try {
+      const token = resolveSmsVerificationToken();
+      const response = await fetch(webhook, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          phone,
+          code,
+          purpose: 'parent_profile_update',
+          ttlSeconds: 600,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.text().catch(() => '');
+        if (isImplicitLocalDefaultWebhook) {
+          console.warn(
+            '[Amanah][DEV_SMS] local default webhook returned non-OK; falling back to development code.',
+            { status: response.status, payload }
+          );
+          throw new Error('IMPLICIT_LOCAL_WEBHOOK_NON_OK');
+        }
+        throw new Error(`Webhook status ${response.status}. ${payload}`);
+      }
+
+      return 'SMS_GATEWAY';
+    } catch (error: any) {
+      if (String(error?.message || '') === 'IMPLICIT_LOCAL_WEBHOOK_NON_OK') {
+        // Keep providerErrors empty so flow can continue to DEV_FALLBACK.
+      } else if (isImplicitLocalDefaultWebhook) {
+        console.warn(
+          '[Amanah][DEV_SMS] local default webhook unreachable; falling back to development code.',
+          error
+        );
+        // Keep providerErrors empty so flow can continue to DEV_FALLBACK.
+      } else {
+      const message = String(error?.message || 'request failed');
+      const normalized = message.toLowerCase();
+      if (
+        webhook === 'http://localhost:8787/sms/verification' &&
+        (normalized.includes('failed to fetch') || normalized.includes('network'))
+      ) {
+        providerErrors.push('Webhook: local SMS webhook is unreachable. Start it with `npm run sms:webhook`.');
+      } else if (
+        normalized.includes('free sms are disabled for this country') ||
+        normalized.includes('textbelt rejected request')
+      ) {
+        providerErrors.push(
+          'Webhook: Textbelt free key is blocked for this country. Use a paid Textbelt key or switch webhook provider to `android_gateway`.'
+        );
+      } else {
+        providerErrors.push(`Webhook: ${message}`);
+      }
+      }
+    }
+  }
+
+  const textbeltKey = resolveSmsTextbeltKey();
+  if (textbeltKey) {
+    try {
+      await sendPhoneVerificationCodeViaTextbelt(phone, code);
+      return 'SMS_GATEWAY';
+    } catch (error: any) {
+      providerErrors.push(`Textbelt: ${String(error?.message || 'request failed')}`);
+    }
+  }
+
+  if (providerErrors.length > 0) {
+    throw new Error(`SMS provider request failed. ${providerErrors.join(' | ')}`);
+  }
+
+  // Development-safe fallback when no SMS provider endpoint exists.
+  console.info(`[Amanah][DEV_SMS] verification code for ${phone}: ${code}`);
+  return 'DEV_FALLBACK';
+};
+
+const sendPhoneVerificationCodeViaFirebase = async (
+  phone: string,
+  appVerifier: ApplicationVerifier
+): Promise<string> => {
+  try {
+    const verificationAuth = getPhoneVerificationAuth();
+    const confirmation = await signInWithPhoneNumber(verificationAuth, phone, appVerifier);
+    return confirmation.verificationId;
+  } catch (error: any) {
+    const mapped = new Error(mapPhoneVerificationError(error));
+    (mapped as any).firebaseCode = String(error?.code || '');
+    throw mapped;
+  }
+};
+
+export const verifyPhoneCodeWithFirebase = async (
+  verificationId: string,
+  code: string
+): Promise<void> => {
+  if (!verificationId) {
+    throw new Error('Missing verification session. Send SMS code first.');
+  }
+  try {
+    const verificationAuth = getPhoneVerificationAuth();
+    const credential = PhoneAuthProvider.credential(verificationId, code);
+    await signInWithCredential(verificationAuth, credential);
+    await signOut(verificationAuth).catch(() => undefined);
+  } catch (error: any) {
+    throw new Error(mapPhoneVerificationError(error));
+  }
+};
+
+const shouldFallbackFromFirebaseSmsError = (error: any): boolean => {
+  const code = String(error?.firebaseCode || error?.code || '').toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+  const isLocalRuntime = (() => {
+    if (typeof window === 'undefined') return false;
+    const host = String(window.location?.hostname || '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  })();
+
+  if (code === 'auth/invalid-phone-number') {
+    return false;
+  }
+
+  // During local development, let invalid app/domain credentials fall back
+  // to configured SMS gateway or DEV code instead of hard failing the flow.
+  if (
+    isLocalRuntime &&
+    (code === 'auth/invalid-app-credential' ||
+      code === 'auth/unauthorized-domain' ||
+      message.includes('invalid app credential') ||
+      message.includes('unauthorized-domain'))
+  ) {
+    return true;
+  }
+
+  return (
+    code === 'auth/billing-not-enabled' ||
+    code === 'auth/operation-not-allowed' ||
+    code === 'auth/captcha-check-failed' ||
+    code === 'auth/too-many-requests' ||
+    code === 'auth/quota-exceeded' ||
+    code === 'auth/network-request-failed' ||
+    message.includes('billing-not-enabled') ||
+    message.includes('quota') ||
+    message.includes('too many') ||
+    message.includes('captcha') ||
+    message.includes('network')
+  );
+};
+
+export const sendProfileContactVerificationCode = async (
+  channel: ContactVerificationChannel,
+  target: string,
+  options?: ContactVerificationOptions
+): Promise<ContactVerificationDispatch> => {
+  const sentAt = Date.now();
+  const expiresAt = sentAt + 10 * 60 * 1000;
+  const code = generateVerificationCode();
+
+  if (channel === 'email') {
+    const email = String(target || '').trim().toLowerCase();
+    if (!ValidationService.isValidEmail(email)) {
+      throw new Error('Invalid email format for verification.');
+    }
+    const delivery = await sendEmailVerificationCodeMessage(email, code);
+    return {
+      channel,
+      target: email,
+      code,
+      sentAt,
+      expiresAt,
+      delivery,
+    };
+  }
+
+  const phone = normalizePhoneForVerification(target);
+  if (!ValidationService.isValidPhoneNumber(phone)) {
+    throw new Error('Invalid phone format for verification.');
+  }
+
+  const preferGatewayBeforeFirebase = shouldPreferSmsGatewayBeforeFirebase();
+
+  if (options?.phoneAppVerifier && !preferGatewayBeforeFirebase) {
+    try {
+      const verificationId = await sendPhoneVerificationCodeViaFirebase(phone, options.phoneAppVerifier);
+      return {
+        channel,
+        target: phone,
+        code: '',
+        verificationId,
+        sentAt,
+        expiresAt,
+        delivery: 'FIREBASE_PHONE_AUTH',
+      };
+    } catch (error: any) {
+      if (!shouldFallbackFromFirebaseSmsError(error)) {
+        throw error;
+      }
+      console.warn('[Amanah][PHONE_SMS] Firebase SMS unavailable, trying fallback provider.', error);
+    }
+  }
+
+  const delivery = await sendPhoneVerificationCodeMessage(phone, code);
+  return {
+    channel,
+    target: phone,
+    code,
+    sentAt,
+    expiresAt,
+    delivery,
+  };
+};
 
 /**
  * Validate document ID to prevent path traversal attacks
@@ -112,6 +771,83 @@ const resolvePlaybookOwnerId = (parentId: string): string | undefined => {
   return authUid;
 };
 
+const LOCK_COMMAND_CACHE_TTL_MS = 10_000;
+
+let lockBypassCache: {
+  uid: string;
+  value: boolean;
+  expiresAt: number;
+} | null = null;
+
+const isLockCommandName = (command: string): boolean =>
+  command === 'lockDevice' || command === 'lockscreenBlackout';
+
+const isLockEnableRequest = (command: string, value: any): boolean => {
+  if (command === 'lockDevice') {
+    return value === true;
+  }
+  if (command !== 'lockscreenBlackout') {
+    return false;
+  }
+  if (typeof value === 'boolean') return value;
+  if (value && typeof value === 'object') {
+    if (typeof value.enabled === 'boolean') return value.enabled;
+    if (value.value && typeof value.value.enabled === 'boolean') return value.value.enabled;
+  }
+  return !!value;
+};
+
+const buildLockBypassValue = (command: string, value: any): any => {
+  if (command === 'lockDevice') return false;
+  const payload =
+    value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+  return {
+    ...payload,
+    enabled: false,
+    message: '',
+    source: 'global_lock_bypass',
+  };
+};
+
+const resolveGlobalLockBypass = async (): Promise<boolean> => {
+  if (!db) return false;
+  const authUid = auth?.currentUser?.uid;
+  if (!authUid) return false;
+
+  const now = Date.now();
+  if (
+    lockBypassCache &&
+    lockBypassCache.uid === authUid &&
+    lockBypassCache.expiresAt > now
+  ) {
+    return lockBypassCache.value;
+  }
+
+  try {
+    const parentSnap = await getDoc(doc(db, PARENTS_COLLECTION, authUid));
+    const enabledFeatures = (parentSnap.data() as any)?.enabledFeatures || {};
+    const allLocksDisabledUntilTs = Number(enabledFeatures?.allLocksDisabledUntil || 0);
+    const isBypassed =
+      enabledFeatures?.allLocksDisabledPermanently === true ||
+      allLocksDisabledUntilTs > now;
+
+    lockBypassCache = {
+      uid: authUid,
+      value: isBypassed,
+      expiresAt: now + LOCK_COMMAND_CACHE_TTL_MS,
+    };
+    return isBypassed;
+  } catch (error) {
+    console.warn('Failed to resolve lock bypass settings; fallback to normal lock behavior.', error);
+    return false;
+  }
+};
+
+const touchesGlobalLockBypassSettings = (updates: any): boolean =>
+  !!updates &&
+  (Object.prototype.hasOwnProperty.call(updates, 'enabledFeatures.allLocksDisabledPermanently') ||
+    Object.prototype.hasOwnProperty.call(updates, 'enabledFeatures.allLocksDisabledUntil'));
+
 /**
  * Send remote command to child device
  * Phase 1.3: Added childId validation to prevent command injection
@@ -122,8 +858,16 @@ export const sendRemoteCommand = async (childId: string, command: string, value:
   // Validate childId to prevent path traversal and command injection
   validateDocumentId(childId, 'childId');
 
+  let commandValue = value;
+  if (isLockCommandName(command) && isLockEnableRequest(command, commandValue)) {
+    const lockBypassEnabled = await resolveGlobalLockBypass();
+    if (lockBypassEnabled) {
+      commandValue = buildLockBypassValue(command, commandValue);
+    }
+  }
+
   // Phase 3.2: Validate command payload
-  const validation = ValidationService.validateCommand(command, value);
+  const validation = ValidationService.validateCommand(command, commandValue);
   if (!validation.valid) {
     console.error(`Command Validation Failed: ${validation.error}`);
     throw new Error(validation.error);
@@ -132,7 +876,7 @@ export const sendRemoteCommand = async (childId: string, command: string, value:
   const childRef = doc(db, CHILDREN_COLLECTION, childId);
   await updateDoc(childRef, {
     [`commands.${command}`]: {
-      value,
+      value: commandValue,
       timestamp: Timestamp.now(),
       status: 'PENDING',
     },
@@ -358,6 +1102,12 @@ export const updateMemberInDB = async (id: string, role: UserRole, updates: any)
         : PARENTS_COLLECTION;
   const ref = doc(db, collectionName, id);
   await updateDoc(ref, updates);
+
+  // Ensure lock command guard picks up setting changes immediately.
+  const authUid = auth?.currentUser?.uid;
+  if (collectionName === PARENTS_COLLECTION && authUid && id === authUid && touchesGlobalLockBypassSettings(updates)) {
+    lockBypassCache = null;
+  }
 };
 
 export const deleteMemberFromDB = async (id: string, role: UserRole): Promise<void> => {
@@ -385,10 +1135,24 @@ export const logUserActivity = async (
 
 export const inviteSupervisor = async (parentId: string, data: any): Promise<FamilyMember> => {
   if (!db) throw new Error('Database not initialized');
+  const inviteEmail = String(data?.email || '').trim().toLowerCase();
+
+  if (!ValidationService.isValidEmail(inviteEmail)) {
+    throw new Error('Invalid invitation email.');
+  }
+
+  // Send a real email invitation first. If this fails, do not create a misleading local record.
+  const inviterName = String(data?.inviterName || data?.name || '').trim();
+  const inviteMethod = await sendCoParentInvitationEmail(inviteEmail, inviterName);
+
   const payload = {
     ...data,
+    email: inviteEmail,
     parentId,
     role: 'SUPERVISOR',
+    inviteStatus: 'EMAIL_SENT',
+    inviteMethod,
+    inviteSentAt: Timestamp.now(),
     createdAt: Timestamp.now(),
   };
   const docRef = await addDoc(collection(db, SUPERVISORS_COLLECTION), payload);

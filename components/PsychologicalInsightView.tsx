@@ -27,6 +27,8 @@ interface PsychologicalInsightViewProps {
   child?: Child;
   alerts?: MonitoringAlert[];
   lang?: 'ar' | 'en';
+  autoLockInAutomationEnabled?: boolean;
+  allLocksDisabled?: boolean;
   onAcceptPlan: (plan: Partial<CustomMode>) => string | void;
   onApplyModeToChild?: (childId: string, modeId?: string) => Promise<void> | void;
   onPlanExecutionResult?: (summary: { done: number; failed: number; skipped: number }) => void;
@@ -133,6 +135,9 @@ const severityRank: Record<AlertSeverity, number> = {
   [AlertSeverity.HIGH]: 3,
   [AlertSeverity.CRITICAL]: 4,
 };
+
+const isAutoLockCommand = (command: AutoExecutionStep['command']): boolean =>
+  command === 'lockDevice' || command === 'lockscreenBlackout';
 
 const scenarioBlockedDomains: Record<PsychScenarioId, string[]> = {
   bullying: ['discord.com', 'telegram.org'],
@@ -1947,6 +1952,8 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
   child,
   alerts = [],
   lang = 'ar',
+  autoLockInAutomationEnabled = true,
+  allLocksDisabled = false,
   onAcceptPlan,
   onApplyModeToChild,
   onPlanExecutionResult,
@@ -2316,7 +2323,9 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
 
   const playbookDrivenSteps = useMemo<AutoExecutionStep[]>(() => {
     const category = scenarioToCategory(activeScenario.id, threatSubtype, contentSubtype, dominantSeverity);
-    const actions = getDefenseActionsWithPlaybooks(category, dominantSeverity, playbooks);
+    const actions = getDefenseActionsWithPlaybooks(category, dominantSeverity, playbooks, {
+      allowAutoLock: autoLockInAutomationEnabled && !allLocksDisabled,
+    });
 
     const priorityToSeverity = (priority: string): AlertSeverity => {
       if (priority === 'critical') return AlertSeverity.CRITICAL;
@@ -2338,7 +2347,16 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
         minSeverity: priorityToSeverity(action.priority),
         enabledByDefault: true,
       }));
-  }, [activeScenario.id, contentSubtype, dominantSeverity, lang, playbooks, threatSubtype]);
+  }, [
+    activeScenario.id,
+    allLocksDisabled,
+    autoLockInAutomationEnabled,
+    contentSubtype,
+    dominantSeverity,
+    lang,
+    playbooks,
+    threatSubtype,
+  ]);
 
   useEffect(() => {
     if (activeScenario.id === 'gaming') {
@@ -2567,11 +2585,16 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
           merged.push(step);
         }
       }
+      if (allLocksDisabled || !autoLockInAutomationEnabled) {
+        return merged.filter((step) => !isAutoLockCommand(step.command));
+      }
       return merged;
     },
     [
       activeContentTrack,
       activeScenario.id,
+      allLocksDisabled,
+      autoLockInAutomationEnabled,
       activeThreatTrack,
       highRiskApp,
       planAudioSource,
@@ -2638,6 +2661,7 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
       autoTakeScreenshot: true,
       blackoutOnApply:
         severityRank[dominantSeverity] >= severityRank[AlertSeverity.HIGH] &&
+        !allLocksDisabled &&
         (activeScenario.id === 'threat_exposure'
           ? activeThreatTrack.preferBlackout
           : activeScenario.id === 'inappropriate_content'
@@ -2713,6 +2737,24 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
         pushTimeline({
           title: step.title,
           detail: lang === 'ar' ? 'تم التخطي لعدم وجود تطبيق عالي الخطورة.' : 'Skipped (no high-risk app).',
+          status: 'skipped',
+        });
+        skipped += 1;
+        continue;
+      }
+
+      if ((allLocksDisabled || !autoLockInAutomationEnabled) && isAutoLockCommand(step.command)) {
+        setAutoStatus((prev) => ({ ...prev, [step.id]: 'skipped' }));
+        pushTimeline({
+          title: step.title,
+          detail:
+            lang === 'ar'
+              ? allLocksDisabled
+                ? 'تخطي الإجراء لأن تعطيل جميع الأقفال مفعل من الإعدادات.'
+                : 'تخطي الإجراء لأن القفل التلقائي معطل من إعدادات المطور.'
+              : allLocksDisabled
+                ? 'Skipped because all locks are disabled in settings.'
+                : 'Skipped because automatic lock is disabled in settings.',
           status: 'skipped',
         });
         skipped += 1;
@@ -3454,6 +3496,20 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
               ? 'يتم تشغيل الأوامر المختارة مباشرة على جهاز الطفل بناءً على مستوى الخطر الحالي.'
               : 'Selected commands run directly on the child device based on the current risk severity.'}
           </p>
+          {allLocksDisabled && (
+            <p className="mt-2 text-[11px] font-black text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+              {lang === 'ar'
+                ? 'تعطيل جميع الأقفال مفعل، ولن يتم إرسال أي أوامر قفل أو شاشة حجب.'
+                : 'All lock actions are disabled, and no lock/blackout commands will be sent.'}
+            </p>
+          )}
+          {!allLocksDisabled && !autoLockInAutomationEnabled && (
+            <p className="mt-2 text-[11px] font-black text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              {lang === 'ar'
+                ? 'القفل التلقائي معطل من الإعدادات، وسيتم تنفيذ باقي الإجراءات فقط.'
+                : 'Automatic lock is disabled from settings, and only non-lock actions will run.'}
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">

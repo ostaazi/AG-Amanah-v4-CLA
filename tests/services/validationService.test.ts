@@ -32,4 +32,12 @@ describe('ValidationService.validateCommand', () => {
     });
     expect(result.valid).toBe(false);
   });
+
+  it('accepts international phone number format', () => {
+    expect(ValidationService.isValidPhoneNumber('+97333112233')).toBe(true);
+  });
+
+  it('rejects malformed phone number', () => {
+    expect(ValidationService.isValidPhoneNumber('03-3311')).toBe(false);
+  });
 });

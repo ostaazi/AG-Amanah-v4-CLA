@@ -1,10 +1,18 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ICONS, AdminShieldBadge, AmanahShield } from '../constants';
 import { ParentAccount, Child, FamilyMember, UserRole, AlertProtocolMode } from '../types';
 import { translations } from '../translations';
-import { fetchSupervisors, updateMemberInDB, logUserActivity, rotatePairingKey } from '../services/firestoreService';
 import {
-  clearAllUserData,
+  fetchSupervisors,
+  updateMemberInDB,
+  logUserActivity,
+  rotatePairingKey,
+  getFirebasePhoneVerificationAuth,
+  isSmsVerificationGatewayConfigured,
+  sendProfileContactVerificationCode,
+  verifyPhoneCodeWithFirebase,
+} from '../services/firestoreService';
+import {
   clearSelectedMockData,
   injectSelectedMockData,
   MOCK_DATA_DOMAINS,
@@ -12,9 +20,11 @@ import {
 } from '../services/mockDataService';
 import { generate2FASecret, getQRCodeUrl, verifyTOTP } from '../services/twoFAService';
 import { logoutUser } from '../services/authService';
+import { ValidationService } from '../services/validationService';
 import AvatarPickerModal from './AvatarPickerModal';
 import { QRCodeSVG } from 'qrcode.react';
 import { useStepUpGuard } from './auth/StepUpGuard';
+import { ApplicationVerifier, RecaptchaVerifier } from 'firebase/auth';
 
 interface SettingsViewProps {
   currentUser: ParentAccount;
@@ -41,6 +51,30 @@ type PendingDeleteState =
     }
   | null;
 
+type ParentContactChannel = 'email' | 'phone';
+
+type ParentContactVerificationState = {
+  target: string;
+  code: string;
+  verificationId?: string;
+  sentAt: number;
+  expiresAt: number;
+  verified: boolean;
+  delivery?: 'EMAIL_LINK' | 'PASSWORD_RESET' | 'FIREBASE_PHONE_AUTH' | 'SMS_GATEWAY' | 'DEV_FALLBACK';
+};
+
+const createEmptyContactVerificationState = (): ParentContactVerificationState => ({
+  target: '',
+  code: '',
+  sentAt: 0,
+  expiresAt: 0,
+  verified: false,
+});
+
+const normalizePhoneInput = (value: string): string => {
+  return String(value || '').trim().replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '');
+};
+
 const SettingsView: React.FC<SettingsViewProps> = ({
   currentUser,
   children,
@@ -65,6 +99,32 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   const [isVerifying, setIsVerifying] = useState(false);
 
   const [newSupervisorEmail, setNewSupervisorEmail] = useState('');
+  const [showParentProfileEditor, setShowParentProfileEditor] = useState(false);
+  const [parentProfileForm, setParentProfileForm] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+  }>({
+    name: currentUser.name || '',
+    email: currentUser.email || '',
+    phone: currentUser.phone || '',
+  });
+  const [parentEmailCodeInput, setParentEmailCodeInput] = useState('');
+  const [parentPhoneCodeInput, setParentPhoneCodeInput] = useState('');
+  const [emailVerificationState, setEmailVerificationState] = useState<ParentContactVerificationState>(
+    createEmptyContactVerificationState()
+  );
+  const [phoneVerificationState, setPhoneVerificationState] = useState<ParentContactVerificationState>(
+    createEmptyContactVerificationState()
+  );
+  const phoneRecaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
+  const [phoneRecaptchaReady, setPhoneRecaptchaReady] = useState(false);
+  const [phoneRecaptchaError, setPhoneRecaptchaError] = useState<string>('');
+  const smsGatewayConfigured = useMemo(() => isSmsVerificationGatewayConfigured(), []);
+  const phoneRecaptchaContainerId = useMemo(
+    () => `parent-phone-recaptcha-${currentUser.id}`,
+    [currentUser.id]
+  );
 
   // States for Adding Child
   const [newChildName, setNewChildName] = useState('');
@@ -115,6 +175,67 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   useEffect(() => {
     setPairingKeyUi(currentUser.pairingKey || '');
   }, [currentUser.pairingKey]);
+
+  useEffect(() => {
+    setParentProfileForm({
+      name: currentUser.name || '',
+      email: currentUser.email || '',
+      phone: currentUser.phone || '',
+    });
+    setParentEmailCodeInput('');
+    setParentPhoneCodeInput('');
+    setEmailVerificationState(createEmptyContactVerificationState());
+    setPhoneVerificationState(createEmptyContactVerificationState());
+  }, [currentUser.name, currentUser.email, currentUser.phone]);
+
+  useEffect(() => {
+    if (!showParentProfileEditor) {
+      if (phoneRecaptchaVerifierRef.current) {
+        phoneRecaptchaVerifierRef.current.clear();
+        phoneRecaptchaVerifierRef.current = null;
+      }
+      setPhoneRecaptchaReady(false);
+      setPhoneRecaptchaError('');
+      return;
+    }
+
+    if (phoneRecaptchaVerifierRef.current) {
+      setPhoneRecaptchaReady(true);
+      return;
+    }
+
+    let mounted = true;
+
+    const initPhoneRecaptcha = async () => {
+      try {
+        const verifier = new RecaptchaVerifier(
+          getFirebasePhoneVerificationAuth(),
+          phoneRecaptchaContainerId,
+          { size: 'invisible' }
+        );
+        await verifier.render();
+
+        if (!mounted) {
+          verifier.clear();
+          return;
+        }
+
+        phoneRecaptchaVerifierRef.current = verifier;
+        setPhoneRecaptchaReady(true);
+        setPhoneRecaptchaError('');
+      } catch (error: any) {
+        if (!mounted) return;
+        setPhoneRecaptchaReady(false);
+        setPhoneRecaptchaError(error?.message || 'Unable to initialize reCAPTCHA.');
+      }
+    };
+
+    void initPhoneRecaptcha();
+
+    return () => {
+      mounted = false;
+    };
+  }, [showParentProfileEditor, phoneRecaptchaContainerId]);
 
   // Phase 4.1: Dynamic Pairing Auto-Rotation
   useEffect(() => {
@@ -217,6 +338,322 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     showSuccessToast(lang === 'ar' ? 'تم تحديث الصورة الشخصية' : 'Profile picture updated');
   };
 
+  const openParentProfileEditor = () => {
+    setParentProfileForm({
+      name: currentUser.name || '',
+      email: currentUser.email || '',
+      phone: currentUser.phone || '',
+    });
+    setParentEmailCodeInput('');
+    setParentPhoneCodeInput('');
+    setEmailVerificationState(createEmptyContactVerificationState());
+    setPhoneVerificationState(createEmptyContactVerificationState());
+    setShowParentProfileEditor(true);
+  };
+
+  const getNormalizedProfileValues = () => {
+    const normalizedName = parentProfileForm.name.trim();
+    const normalizedEmail = parentProfileForm.email.trim().toLowerCase();
+    const normalizedPhone = normalizePhoneInput(parentProfileForm.phone);
+    const currentEmail = String(currentUser.email || '').trim().toLowerCase();
+    const currentPhone = normalizePhoneInput(currentUser.phone || '');
+    const isEmailChanged = normalizedEmail !== currentEmail;
+    const isPhoneChanged = normalizedPhone !== currentPhone;
+    return {
+      normalizedName,
+      normalizedEmail,
+      normalizedPhone,
+      isEmailChanged,
+      isPhoneChanged,
+    };
+  };
+
+  const handleSendParentContactVerificationCode = async (channel: ParentContactChannel) => {
+    const { normalizedEmail, normalizedPhone } = getNormalizedProfileValues();
+    const target = channel === 'email' ? normalizedEmail : normalizedPhone;
+
+    if (!target) {
+      showSuccessToast(
+        lang === 'ar'
+          ? channel === 'email'
+            ? 'أدخل البريد الإلكتروني أولاً.'
+            : 'أدخل رقم الهاتف أولاً.'
+          : channel === 'email'
+            ? 'Enter the email first.'
+            : 'Enter the phone number first.'
+      );
+      return;
+    }
+
+    if (channel === 'email' && !ValidationService.isValidEmail(target)) {
+      showSuccessToast(lang === 'ar' ? 'صيغة البريد الإلكتروني غير صحيحة.' : 'Invalid email format.');
+      return;
+    }
+
+    if (channel === 'phone' && !ValidationService.isValidPhoneNumber(target)) {
+      showSuccessToast(
+        lang === 'ar'
+          ? 'صيغة رقم الهاتف غير صحيحة. استخدم تنسيقًا دوليًا مثل +974XXXXXXXX.'
+          : 'Invalid phone format. Use international format such as +974XXXXXXXX.'
+      );
+      return;
+    }
+
+    const canUseFirebasePhoneSms = Boolean(phoneRecaptchaVerifierRef.current);
+    if (channel === 'phone' && !canUseFirebasePhoneSms && !smsGatewayConfigured) {
+      showSuccessToast(
+        lang === 'ar'
+          ? 'تعذر تهيئة reCAPTCHA لإرسال SMS عبر Firebase. أعد فتح نافذة التعديل ثم حاول مجددًا.'
+          : 'Could not initialize reCAPTCHA for Firebase SMS. Reopen the edit modal and try again.'
+      );
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const dispatch = await sendProfileContactVerificationCode(
+        channel,
+        target,
+        channel === 'phone' && canUseFirebasePhoneSms
+          ? { phoneAppVerifier: phoneRecaptchaVerifierRef.current as ApplicationVerifier }
+          : undefined
+      );
+      if (channel === 'email') {
+        setParentEmailCodeInput('');
+        setEmailVerificationState({
+          target: dispatch.target,
+          code: dispatch.code,
+          sentAt: dispatch.sentAt,
+          expiresAt: dispatch.expiresAt,
+          verified: false,
+          delivery: dispatch.delivery,
+        });
+      } else {
+        setParentPhoneCodeInput('');
+        setPhoneVerificationState({
+          target: dispatch.target,
+          code: dispatch.code,
+          verificationId: dispatch.verificationId,
+          sentAt: dispatch.sentAt,
+          expiresAt: dispatch.expiresAt,
+          verified: false,
+          delivery: dispatch.delivery,
+        });
+      }
+
+      if (dispatch.delivery === 'DEV_FALLBACK') {
+        showSuccessToast(
+          lang === 'ar'
+            ? `وضع التطوير مفعّل: لم يتم إرسال رسالة SMS فعلية. استخدم كود الاختبار: ${dispatch.code}`
+            : `Development mode is active: no real SMS was sent. Use this test code: ${dispatch.code}`
+        );
+        return;
+      }
+
+      if (dispatch.delivery === 'FIREBASE_PHONE_AUTH') {
+        showSuccessToast(
+          lang === 'ar'
+            ? 'تم إرسال رسالة SMS فعلية عبر Firebase. أدخل الكود المرسل إلى الهاتف خلال 10 دقائق.'
+            : 'A real SMS has been sent via Firebase. Enter the code received on the phone within 10 minutes.'
+        );
+        return;
+      }
+
+      showSuccessToast(
+        lang === 'ar'
+          ? channel === 'email'
+            ? 'تم إرسال رسالة تحقق للبريد. خذ الكود من الرابط داخل الرسالة (المتغير vc) ثم أدخله خلال 10 دقائق.'
+            : 'تم إرسال رسالة SMS بكود التحقق. أدخله خلال 10 دقائق.'
+          : channel === 'email'
+            ? 'Verification email sent. Copy the vc code from the link in the message, then enter it within 10 minutes.'
+            : 'SMS verification code sent. Enter it within 10 minutes.'
+      );
+    } catch (error: any) {
+      console.error('Failed to dispatch profile contact verification code:', error);
+      showSuccessToast(
+        lang === 'ar'
+          ? `تعذر إرسال كود التحقق: ${error?.message || 'تحقق من الإعدادات.'}`
+          : `Failed to send verification code: ${error?.message || 'Check configuration.'}`
+      );
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleVerifyParentContactCode = async (channel: ParentContactChannel) => {
+    const state = channel === 'email' ? emailVerificationState : phoneVerificationState;
+    const input = (channel === 'email' ? parentEmailCodeInput : parentPhoneCodeInput).trim();
+    const { normalizedEmail, normalizedPhone } = getNormalizedProfileValues();
+    const target = channel === 'email' ? normalizedEmail : normalizedPhone;
+
+    if (!state.sentAt || (!state.code && !state.verificationId)) {
+      showSuccessToast(
+        lang === 'ar'
+          ? channel === 'email'
+            ? 'أرسل كود البريد أولاً.'
+            : 'أرسل كود الهاتف أولاً.'
+          : channel === 'email'
+            ? 'Send the email code first.'
+            : 'Send the phone code first.'
+      );
+      return;
+    }
+
+    if (state.target !== target) {
+      showSuccessToast(
+        lang === 'ar'
+          ? 'تم تغيير الحقل بعد الإرسال. أعد إرسال كود جديد.'
+          : 'Field changed after send. Please resend a new code.'
+      );
+      return;
+    }
+
+    if (Date.now() > state.expiresAt) {
+      showSuccessToast(
+        lang === 'ar'
+          ? 'انتهت صلاحية الكود. أعد الإرسال.'
+          : 'Verification code expired. Please resend.'
+      );
+      return;
+    }
+
+    if (!/^\d{6}$/.test(input)) {
+      showSuccessToast(
+        lang === 'ar' ? 'أدخل كود مكوّنًا من 6 أرقام.' : 'Enter a 6-digit verification code.'
+      );
+      return;
+    }
+
+    if (channel === 'phone' && state.delivery === 'FIREBASE_PHONE_AUTH') {
+      if (!state.verificationId) {
+        showSuccessToast(
+          lang === 'ar'
+            ? 'جلسة التحقق مفقودة. أعد إرسال كود الهاتف.'
+            : 'Verification session missing. Please resend the phone code.'
+        );
+        return;
+      }
+
+      setIsProcessing(true);
+      try {
+        await verifyPhoneCodeWithFirebase(state.verificationId, input);
+        setPhoneVerificationState((prev) => ({ ...prev, verified: true }));
+        showSuccessToast(
+          lang === 'ar' ? 'تم توثيق رقم الهاتف عبر Firebase بنجاح.' : 'Phone verified via Firebase.'
+        );
+      } catch (error: any) {
+        showSuccessToast(
+          lang === 'ar'
+            ? `تعذر توثيق رقم الهاتف: ${error?.message || 'تحقق من إعدادات Firebase Phone Auth.'}`
+            : `Phone verification failed: ${error?.message || 'Check Firebase Phone Auth settings.'}`
+        );
+      } finally {
+        setIsProcessing(false);
+      }
+      return;
+    }
+
+    if (input !== state.code) {
+      showSuccessToast(lang === 'ar' ? 'كود التحقق غير صحيح.' : 'Invalid verification code.');
+      return;
+    }
+
+    if (channel === 'email') {
+      setEmailVerificationState((prev) => ({ ...prev, verified: true }));
+      showSuccessToast(lang === 'ar' ? 'تم توثيق البريد الإلكتروني.' : 'Email verified successfully.');
+      return;
+    }
+
+    setPhoneVerificationState((prev) => ({ ...prev, verified: true }));
+    showSuccessToast(lang === 'ar' ? 'تم توثيق رقم الهاتف.' : 'Phone number verified successfully.');
+  };
+
+  const handleSaveParentProfile = async () => {
+    const { normalizedName, normalizedEmail, normalizedPhone, isEmailChanged, isPhoneChanged } =
+      getNormalizedProfileValues();
+
+    if (!normalizedName) {
+      showSuccessToast(lang === 'ar' ? 'اسم الأب مطلوب.' : 'Father name is required.');
+      return;
+    }
+    if (!ValidationService.isSafeText(normalizedName)) {
+      showSuccessToast(lang === 'ar' ? 'الاسم يحتوي رموزًا غير مسموحة.' : 'Name contains unsafe characters.');
+      return;
+    }
+    if (normalizedEmail && !ValidationService.isValidEmail(normalizedEmail)) {
+      showSuccessToast(lang === 'ar' ? 'صيغة البريد الإلكتروني غير صحيحة.' : 'Invalid email format.');
+      return;
+    }
+    if (normalizedPhone && !ValidationService.isValidPhoneNumber(normalizedPhone)) {
+      showSuccessToast(
+        lang === 'ar'
+          ? 'صيغة رقم الهاتف غير صحيحة. استخدم تنسيقًا دوليًا مثل +974XXXXXXXX.'
+          : 'Invalid phone format. Use international format such as +974XXXXXXXX.'
+      );
+      return;
+    }
+
+    const isNameChanged = normalizedName !== String(currentUser.name || '').trim();
+    if (!isNameChanged && !isEmailChanged && !isPhoneChanged) {
+      showSuccessToast(lang === 'ar' ? 'لا توجد تغييرات للحفظ.' : 'No changes to save.');
+      return;
+    }
+
+    if (isEmailChanged && normalizedEmail) {
+      const validEmailVerification =
+        emailVerificationState.verified &&
+        emailVerificationState.target === normalizedEmail &&
+        emailVerificationState.expiresAt > Date.now();
+      if (!validEmailVerification) {
+        showSuccessToast(
+          lang === 'ar'
+            ? 'تحقق من البريد الإلكتروني مطلوب قبل الحفظ.'
+            : 'Email verification is required before saving.'
+        );
+        return;
+      }
+    }
+
+    if (isPhoneChanged && normalizedPhone) {
+      const validPhoneVerification =
+        phoneVerificationState.verified &&
+        phoneVerificationState.target === normalizedPhone &&
+        phoneVerificationState.expiresAt > Date.now();
+      if (!validPhoneVerification) {
+        showSuccessToast(
+          lang === 'ar'
+            ? 'تحقق من رقم الهاتف مطلوب قبل الحفظ.'
+            : 'Phone verification is required before saving.'
+        );
+        return;
+      }
+    }
+
+    const updates: any = {};
+    if (isNameChanged) updates.name = normalizedName;
+    if (isEmailChanged) {
+      updates.email = normalizedEmail || null;
+      updates.emailVerified = normalizedEmail ? true : false;
+    }
+    if (isPhoneChanged) {
+      updates.phone = normalizedPhone || null;
+      updates.phoneVerified = normalizedPhone ? true : false;
+    }
+
+    await requireStepUp('SENSITIVE_SETTINGS', async () => {
+      setIsProcessing(true);
+      try {
+        await onUpdateMember(currentUser.id, 'ADMIN', updates);
+        setShowParentProfileEditor(false);
+        showSuccessToast(
+          lang === 'ar' ? 'تم تحديث ملف الأب بنجاح.' : 'Father profile updated successfully.'
+        );
+      } finally {
+        setIsProcessing(false);
+      }
+    });
+  };
+
   const handleAddChildProfile = async () => {
     if (!newChildName || !newChildAge) return;
     setIsProcessing(true);
@@ -243,19 +680,44 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleAddSupervisor = async () => {
-    if (!newSupervisorEmail) return;
+    const inviteEmail = newSupervisorEmail.trim().toLowerCase();
+    if (!inviteEmail) return;
+    if (!ValidationService.isValidEmail(inviteEmail)) {
+      showSuccessToast(lang === 'ar' ? 'صيغة البريد الإلكتروني غير صحيحة.' : 'Invalid email format.');
+      return;
+    }
+
     setIsProcessing(true);
     try {
       const newSup = await onAddSupervisor({
-        email: newSupervisorEmail,
-        name: newSupervisorEmail.split('@')[0],
+        email: inviteEmail,
+        name: inviteEmail.split('@')[0],
+        inviterName: currentUser?.name || currentUser?.email || '',
         avatar:
           'https://img.freepik.com/premium-vector/hijab-woman-avatar-illustration-vector-woman-hijab-profile-icon_671746-348.jpg',
       });
       setSupervisors([...supervisors, newSup]);
       setNewSupervisorEmail('');
+      const inviteMethod = (newSup as any)?.inviteMethod;
       showSuccessToast(
-        lang === 'ar' ? 'تم إرسال دعوة للمشرف بنجاح' : 'Supervisor invited successfully'
+        inviteMethod === 'CUSTOM_EMAIL'
+          ? lang === 'ar'
+            ? 'تم إرسال دعوة جميلة إلى بريد الأم بنجاح! ✉️'
+            : 'Beautiful invitation email sent successfully! ✉️'
+          : inviteMethod === 'PASSWORD_RESET'
+            ? lang === 'ar'
+              ? 'تم إرسال دعوة الأم عبر بريد ضبط كلمة المرور. إذا كانت في spam أو لم تصل، استخدمي "نسيت كلمة المرور" بنفس البريد لإكمال الدعوة.'
+              : 'Mother invite sent via password-reset email. If it is in Spam or missing, use Forgot Password with the same email.'
+            : lang === 'ar'
+              ? 'تم إرسال دعوة فعلية إلى بريد الأم. إذا كانت في spam أو لم تصل، استخدمي "نسيت كلمة المرور" بنفس البريد.'
+              : 'Invitation email sent. If it is in Spam or missing, use Forgot Password with the same email.'
+      );
+    } catch (error: any) {
+      console.error('Failed to send co-parent invitation email:', error);
+      showSuccessToast(
+        lang === 'ar'
+          ? `فشل إرسال دعوة البريد: ${error?.message || 'تحقق من إعدادات Firebase Auth.'}`
+          : `Failed to send invitation email: ${error?.message || 'Check Firebase Auth settings.'}`
       );
     } finally {
       setIsProcessing(false);
@@ -293,6 +755,22 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   const copySecret = () => {
     navigator.clipboard.writeText(tempSecret);
     showSuccessToast(lang === 'ar' ? 'تم نسخ كود الأمان!' : 'Key copied!');
+  };
+
+  const copyVerificationCode = async (code: string) => {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      showSuccessToast(
+        lang === 'ar' ? 'تم نسخ كود التحقق التجريبي.' : 'Test verification code copied.'
+      );
+    } catch {
+      showSuccessToast(
+        lang === 'ar'
+          ? 'تعذر نسخ الكود تلقائيًا. انسخه يدويًا من الشاشة.'
+          : 'Could not copy the code automatically. Please copy it manually from the screen.'
+      );
+    }
   };
 
   const roleOptions = useMemo(
@@ -337,6 +815,14 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     setSelectedMockDomains(isAllMockDomainsSelected ? [] : [...MOCK_DATA_DOMAINS]);
   };
 
+  const showMockOpsDisabledToast = () => {
+    showSuccessToast(
+      lang === 'ar'
+        ? 'عمليات البيانات الوهمية متاحة فقط عبر المحاكي (Emulator).'
+        : 'Mock data operations are only allowed when the emulator is enabled.'
+    );
+  };
+
   const handleInjectMockData = async () => {
     if (selectedMockDomains.length === 0 || isProcessing) return;
     setIsProcessing(true);
@@ -349,7 +835,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           ? `تم حقن بيانات تجريبية (${total})`
           : `Injected mock records (${total})`
       );
-    } catch (e) {
+    } catch (e: any) {
+      if (String(e?.message || '').includes('MOCK_DATA_DISABLED')) {
+        showMockOpsDisabledToast();
+        return;
+      }
       console.error('Inject mock data failed', e);
       showSuccessToast(lang === 'ar' ? 'تعذر حقن البيانات الوهمية' : 'Failed to inject mock data');
     } finally {
@@ -369,7 +859,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           ? `تم حذف بيانات تجريبية (${total})`
           : `Deleted mock records (${total})`
       );
-    } catch (e) {
+    } catch (e: any) {
+      if (String(e?.message || '').includes('MOCK_DATA_DISABLED')) {
+        showMockOpsDisabledToast();
+        return;
+      }
       console.error('Clear mock data failed', e);
       showSuccessToast(lang === 'ar' ? 'تعذر حذف البيانات الوهمية' : 'Failed to delete mock data');
     } finally {
@@ -433,11 +927,43 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     try {
       if (pendingDelete.kind === 'member') {
         await onDeleteMember(pendingDelete.id, pendingDelete.role);
+
+        if (pendingDelete.source === 'supervisor') {
+          setSupervisors((prev) => prev.filter((sup) => sup.id !== pendingDelete.id));
+          showSuccessToast(lang === 'ar' ? 'تم حذف المشرف بنجاح.' : 'Supervisor deleted successfully.');
+        } else if (pendingDelete.source === 'child') {
+          showSuccessToast(lang === 'ar' ? 'تم حذف الطفل بنجاح.' : 'Child deleted successfully.');
+        } else if (pendingDelete.source === 'device') {
+          showSuccessToast(
+            lang === 'ar' ? 'تم حذف الجهاز المرتبط بنجاح.' : 'Linked device deleted successfully.'
+          );
+        }
       } else if (pendingDelete.kind === 'purge') {
-        await clearAllUserData(currentUser.id);
-        window.location.reload();
-        return;
+        try {
+          const result = await clearSelectedMockData(currentUser.id, [...MOCK_DATA_DOMAINS]);
+          const total = Object.values(result).reduce((acc, n) => acc + n, 0);
+          setLastMockOperation({ mode: 'delete', result, total, at: new Date() });
+          showSuccessToast(
+            lang === 'ar'
+              ? `تم حذف كل البيانات الوهمية (${total})`
+              : `Deleted all mock records (${total})`
+          );
+        } catch (e: any) {
+          if (String(e?.message || '').includes('MOCK_DATA_DISABLED')) {
+            showMockOpsDisabledToast();
+            return;
+          }
+          console.error('Clear all mock data failed', e);
+          showSuccessToast(
+            lang === 'ar' ? 'تعذر حذف كل البيانات الوهمية' : 'Failed to delete all mock data'
+          );
+        }
       }
+    } catch (error) {
+      console.error('Delete action failed:', error);
+      showSuccessToast(
+        lang === 'ar' ? 'تعذر تنفيذ عملية الحذف. تحقق من الصلاحيات.' : 'Delete failed. Check permissions.'
+      );
     } finally {
       setIsProcessing(false);
       setPendingDelete(null);
@@ -449,6 +975,80 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     lang,
     currentUser,
   });
+  const lockDisableUntilTs = Number(currentUser.enabledFeatures?.allLocksDisabledUntil || 0);
+  const isLockDisableTemporaryActive = lockDisableUntilTs > Date.now();
+  const isLockDisablePermanentActive =
+    currentUser.enabledFeatures?.allLocksDisabledPermanently === true;
+  const isAllLocksDisableActive = isLockDisablePermanentActive || isLockDisableTemporaryActive;
+  const lockDisableUntilLabel = isLockDisableTemporaryActive
+    ? new Date(lockDisableUntilTs).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US')
+    : '';
+  const normalizedCurrentEmail = String(currentUser.email || '').trim().toLowerCase();
+  const normalizedCurrentPhone = normalizePhoneInput(currentUser.phone || '');
+  const normalizedEditorEmail = parentProfileForm.email.trim().toLowerCase();
+  const normalizedEditorPhone = normalizePhoneInput(parentProfileForm.phone);
+  const emailVerificationRequired =
+    !!normalizedEditorEmail && normalizedEditorEmail !== normalizedCurrentEmail;
+  const phoneVerificationRequired =
+    !!normalizedEditorPhone && normalizedEditorPhone !== normalizedCurrentPhone;
+
+  const setTemporaryLockDisable = async (minutes: number) => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      const until = Date.now() + minutes * 60 * 1000;
+      await onUpdateMember(currentUser.id, 'ADMIN', {
+        ['enabledFeatures.allLocksDisabledUntil']: until,
+      });
+      showSuccessToast(
+        lang === 'ar'
+          ? `تم تعطيل جميع الأقفال مؤقتًا لمدة ${minutes} دقيقة`
+          : `All locks disabled temporarily for ${minutes} minutes`
+      );
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const togglePermanentLockDisable = async () => {
+    if (isProcessing) return;
+    const next = !isLockDisablePermanentActive;
+    setIsProcessing(true);
+    try {
+      await onUpdateMember(currentUser.id, 'ADMIN', {
+        ['enabledFeatures.allLocksDisabledPermanently']: next,
+      });
+      showSuccessToast(
+        next
+          ? lang === 'ar'
+            ? 'تم تعطيل جميع الأقفال بشكل دائم'
+            : 'All locks disabled permanently'
+          : lang === 'ar'
+            ? 'تم إيقاف التعطيل الدائم للأقفال'
+            : 'Permanent lock disable has been turned off'
+      );
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const reactivateAllLocks = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      await onUpdateMember(currentUser.id, 'ADMIN', {
+        ['enabledFeatures.allLocksDisabledPermanently']: false,
+        ['enabledFeatures.allLocksDisabledUntil']: 0,
+      });
+      showSuccessToast(
+        lang === 'ar'
+          ? 'تمت إعادة تفعيل جميع الأقفال'
+          : 'All lock controls re-enabled'
+      );
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   return (
     <div
@@ -461,6 +1061,293 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         onSelect={handleAvatarSelect}
         currentAvatar={pickerConfig?.currentUrl}
       />
+
+      <section className="space-y-4">
+        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-5">
+            <button
+              onClick={() =>
+                setPickerConfig({
+                  isOpen: true,
+                  targetId: currentUser.id,
+                  targetRole: 'ADMIN',
+                  currentUrl: currentUser.avatar,
+                })
+              }
+              className="relative group"
+            >
+              <img
+                src={currentUser.avatar}
+                className="w-20 h-20 rounded-3xl object-cover shadow-sm border border-slate-100"
+              />
+              <div className="absolute inset-0 bg-black/40 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
+                <span className="text-white text-[10px] font-black uppercase">
+                  {lang === 'ar' ? 'تغيير' : 'Change'}
+                </span>
+              </div>
+            </button>
+            <div className="text-right flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black text-indigo-500 uppercase tracking-widest">
+                    {lang === 'ar' ? 'ملف الأب' : 'Father Profile'}
+                  </p>
+                  <h3 className="text-xl font-black text-slate-900">{currentUser.name}</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={openParentProfileEditor}
+                  className="p-3 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-800 hover:text-white transition-all"
+                  title={lang === 'ar' ? 'تعديل ملف الأب' : 'Edit father profile'}
+                >
+                  <ICONS.Settings className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-xs font-bold text-slate-400">{currentUser.email || '-'}</p>
+              <p className="text-[11px] font-bold text-slate-400">
+                {currentUser.phone || (lang === 'ar' ? 'رقم الهاتف غير مضاف' : 'Phone number not set')}
+              </p>
+              <p className="text-[11px] font-bold text-slate-500 mt-1">
+                {lang === 'ar'
+                  ? 'اضغط على الصورة لتغيير أفاتار الأب مباشرة.'
+                  : 'Click the picture to update father avatar.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {showParentProfileEditor && (
+        <div className="fixed inset-0 z-[8700] bg-slate-900/65 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white rounded-[2.5rem] border border-slate-100 shadow-2xl overflow-hidden">
+            <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between">
+              <button
+                onClick={() => setShowParentProfileEditor(false)}
+                className="p-3 bg-slate-100 text-slate-500 rounded-xl"
+              >
+                <ICONS.Close className="w-5 h-5" />
+              </button>
+              <h3 className="text-2xl font-black text-slate-900">
+                {lang === 'ar' ? 'تعديل ملف الأب' : 'Edit Father Profile'}
+              </h3>
+            </div>
+
+            <div className="p-8 space-y-8">
+              <div className="space-y-2">
+                <label className="text-sm font-black text-slate-400">
+                  {lang === 'ar' ? 'اسم الأب' : 'Father Name'}
+                </label>
+                <input
+                  type="text"
+                  value={parentProfileForm.name}
+                  onChange={(e) =>
+                    setParentProfileForm((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-base font-black text-slate-900 outline-none text-right"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-sm font-black text-slate-400">
+                  {lang === 'ar' ? 'البريد الإلكتروني' : 'Email Address'}
+                </label>
+                <div className="flex flex-col md:flex-row gap-3">
+                  <input
+                    type="email"
+                    value={parentProfileForm.email}
+                    onChange={(e) =>
+                      setParentProfileForm((prev) => ({ ...prev, email: e.target.value }))
+                    }
+                    className="flex-1 p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-black text-slate-900 outline-none text-right"
+                    placeholder="name@example.com"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleSendParentContactVerificationCode('email');
+                    }}
+                    disabled={isProcessing || !emailVerificationRequired}
+                    className="px-5 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs shadow-lg disabled:opacity-50"
+                  >
+                    {lang === 'ar' ? 'إرسال كود البريد' : 'Send email code'}
+                  </button>
+                </div>
+                {emailVerificationRequired && (
+                  <div className="space-y-2">
+                    <div className="flex flex-col md:flex-row gap-3">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={parentEmailCodeInput}
+                        onChange={(e) =>
+                          setParentEmailCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))
+                        }
+                        className="flex-1 p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-black text-slate-900 outline-none text-center tracking-[0.25em]"
+                        placeholder={lang === 'ar' ? 'كود التحقق 6 أرقام' : '6-digit code'}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleVerifyParentContactCode('email');
+                        }}
+                        disabled={isProcessing || !emailVerificationState.code}
+                        className="px-5 py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs shadow-lg disabled:opacity-50"
+                      >
+                        {lang === 'ar' ? 'توثيق البريد' : 'Verify email'}
+                      </button>
+                    </div>
+                    <p className="text-[11px] font-bold text-slate-500">
+                      {emailVerificationState.verified
+                        ? lang === 'ar'
+                          ? 'تم توثيق البريد الإلكتروني بنجاح.'
+                          : 'Email verified successfully.'
+                        : lang === 'ar'
+                          ? 'يلزم توثيق البريد قبل الحفظ.'
+                          : 'Email must be verified before saving.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-sm font-black text-slate-400">
+                  {lang === 'ar' ? 'رقم الهاتف' : 'Phone Number'}
+                </label>
+                {!phoneRecaptchaReady && !smsGatewayConfigured && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    <p className="text-[11px] font-bold text-amber-800">
+                      {lang === 'ar'
+                        ? 'جار تهيئة التحقق الأمني (reCAPTCHA) لإرسال رسالة SMS فعلية عبر Firebase...'
+                        : 'Initializing reCAPTCHA to send a real SMS through Firebase...'}
+                    </p>
+                  </div>
+                )}
+                {phoneRecaptchaError && !smsGatewayConfigured && (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+                    <p className="text-[11px] font-bold text-red-700">
+                      {lang === 'ar'
+                        ? `تعذر تهيئة reCAPTCHA: ${phoneRecaptchaError}`
+                        : `reCAPTCHA initialization failed: ${phoneRecaptchaError}`}
+                    </p>
+                  </div>
+                )}
+                <div id={phoneRecaptchaContainerId} className="min-h-[1px]" />
+                <div className="flex flex-col md:flex-row gap-3">
+                  <input
+                    type="tel"
+                    value={parentProfileForm.phone}
+                    onChange={(e) =>
+                      setParentProfileForm((prev) => ({ ...prev, phone: e.target.value }))
+                    }
+                    className="flex-1 p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-black text-slate-900 outline-none text-right"
+                    placeholder="+974XXXXXXXX"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleSendParentContactVerificationCode('phone');
+                    }}
+                    disabled={
+                      isProcessing ||
+                      !phoneVerificationRequired ||
+                      (!phoneRecaptchaReady && !smsGatewayConfigured)
+                    }
+                    className="px-5 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs shadow-lg disabled:opacity-50"
+                  >
+                    {lang === 'ar' ? 'إرسال كود SMS فعلي' : 'Send real SMS code'}
+                  </button>
+                </div>
+                {phoneVerificationRequired && (
+                  <div className="space-y-2">
+                    <div className="flex flex-col md:flex-row gap-3">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={parentPhoneCodeInput}
+                        onChange={(e) =>
+                          setParentPhoneCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))
+                        }
+                        className="flex-1 p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-black text-slate-900 outline-none text-center tracking-[0.25em]"
+                        placeholder={lang === 'ar' ? 'كود التحقق 6 أرقام' : '6-digit code'}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleVerifyParentContactCode('phone');
+                        }}
+                        disabled={
+                          isProcessing ||
+                          (!phoneVerificationState.code && !phoneVerificationState.verificationId)
+                        }
+                        className="px-5 py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs shadow-lg disabled:opacity-50"
+                      >
+                        {lang === 'ar' ? 'توثيق الهاتف' : 'Verify phone'}
+                      </button>
+                    </div>
+                    <p className="text-[11px] font-bold text-slate-500">
+                      {phoneVerificationState.verified
+                        ? lang === 'ar'
+                          ? 'تم توثيق رقم الهاتف بنجاح.'
+                          : 'Phone verified successfully.'
+                        : phoneVerificationState.delivery === 'FIREBASE_PHONE_AUTH'
+                          ? lang === 'ar'
+                            ? 'أدخل الكود الحقيقي الذي وصلك على الهاتف ثم اضغط "توثيق الهاتف".'
+                            : 'Enter the real SMS code you received, then press "Verify phone".'
+                        : lang === 'ar'
+                          ? 'يلزم توثيق رقم الهاتف قبل الحفظ.'
+                          : 'Phone must be verified before saving.'}
+                    </p>
+                    {phoneVerificationState.delivery === 'DEV_FALLBACK' &&
+                      Boolean(phoneVerificationState.code) && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+                          <p className="text-[11px] font-bold text-amber-800">
+                            {lang === 'ar'
+                              ? 'هذا كود اختبار من بيئة التطوير. Firebase لم يرسل SMS حقيقي لهذا الرقم.'
+                              : 'This is a development test code. Firebase did not send a real SMS to this number.'}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <code className="px-3 py-2 rounded-xl bg-white border border-amber-200 text-xs font-black tracking-[0.2em] text-amber-900">
+                              {phoneVerificationState.code}
+                            </code>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void copyVerificationCode(phoneVerificationState.code);
+                              }}
+                              className="px-3 py-2 rounded-xl bg-amber-600 text-white text-xs font-black"
+                            >
+                              {lang === 'ar' ? 'نسخ الكود' : 'Copy code'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="px-8 py-6 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowParentProfileEditor(false)}
+                className="px-6 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-sm"
+              >
+                {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSaveParentProfile();
+                }}
+                disabled={isProcessing}
+                className="px-6 py-3 bg-indigo-600 text-white rounded-2xl font-black text-sm shadow-lg disabled:opacity-50"
+              >
+                {lang === 'ar' ? 'حفظ ملف الأب' : 'Save father profile'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 1. قسم إدارة الأبناء */}
       <section className="space-y-6">
@@ -814,7 +1701,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="bg-indigo-50/50 p-6 rounded-[2.5rem] border-2 border-dashed border-indigo-200 flex flex-col md:flex-row gap-4 items-center">
             <input
               type="email"
-              placeholder="البريد الإلكتروني..."
+              placeholder={lang === 'ar' ? 'بريد الأم الإلكتروني...' : 'Mother email...'}
               value={newSupervisorEmail}
               onChange={(e) => setNewSupervisorEmail(e.target.value)}
               className="flex-1 p-5 bg-white border border-indigo-100 rounded-2xl outline-none font-bold text-sm text-right"
@@ -824,7 +1711,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
               disabled={isProcessing}
               className="px-8 py-5 bg-indigo-600 text-white rounded-2xl font-black text-sm shadow-lg active:scale-95 transition-all w-full md:w-auto"
             >
-              {t.add}
+              {lang === 'ar' ? 'إرسال دعوة الأم' : 'Send mother invite'}
             </button>
           </div>
 
@@ -852,8 +1739,25 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
                   </button>
                   <div>
-                    <p className="text-lg font-black text-slate-800">{sup.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-lg font-black text-slate-800">{sup.name}</p>
+                      {sup.inviteStatus === 'EMAIL_SENT' && (
+                        <span className="px-2 py-0.5 text-[9px] font-bold rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                          {lang === 'ar' ? 'بانتظار القبول' : 'Pending'}
+                        </span>
+                      )}
+                      {sup.inviteStatus === 'ACCEPTED' && (
+                        <span className="px-2 py-0.5 text-[9px] font-bold rounded-full bg-green-100 text-green-700 border border-green-200">
+                          {lang === 'ar' ? 'مفعّل' : 'Active'}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[10px] font-bold text-slate-400">{sup.email}</p>
+                    {sup.inviteStatus === 'EMAIL_SENT' && (
+                      <p className="text-[9px] text-amber-500 mt-1">
+                        {lang === 'ar' ? '📧 تم إرسال الدعوة — بانتظار تسجيل الأم' : '📧 Invitation sent — waiting for sign-up'}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <button
@@ -998,6 +1902,86 @@ const SettingsView: React.FC<SettingsViewProps> = ({
               <span className="order-2 font-black text-slate-700 text-sm text-right">مراقبة المحادثات</span>
               <div className="order-1 w-8 h-8 bg-pink-100 text-pink-600 rounded-lg flex items-center justify-center"><ICONS.Chat className="w-4 h-4" /></div>
             </div>
+          </div>
+
+          {/* Auto Lock in Automation */}
+          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[2rem]">
+            <div className="order-2 relative w-12 h-7 bg-slate-200 rounded-full p-1 cursor-pointer transition-colors duration-300 data-[on=true]:bg-indigo-600"
+              data-on={currentUser.enabledFeatures?.autoLockInAutomation !== false}
+              onClick={() => onUpdateMember(currentUser.id, 'ADMIN', { [`enabledFeatures.autoLockInAutomation`]: currentUser.enabledFeatures?.autoLockInAutomation === false })}
+            >
+              <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-300 ${currentUser.enabledFeatures?.autoLockInAutomation !== false ? '-translate-x-5' : 'translate-x-0'}`} />
+            </div>
+            <div className="order-1 flex items-center gap-3">
+              <span className="order-2 font-black text-slate-700 text-sm text-right">القفل التلقائي في البروتوكولات</span>
+              <div className="order-1 w-8 h-8 bg-red-100 text-red-600 rounded-lg flex items-center justify-center"><ICONS.ShieldCheck className="w-4 h-4" /></div>
+            </div>
+          </div>
+
+          <div className="md:col-span-2 rounded-[2rem] border border-rose-100 bg-rose-50/60 p-5 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-right">
+                <p className="text-sm font-black text-rose-800">تعطيل جميع الأقفال (وضع المطور)</p>
+                <p className="text-[11px] font-bold text-rose-600">
+                  {isAllLocksDisableActive
+                    ? isLockDisablePermanentActive
+                      ? 'الحالة: تعطيل دائم مفعل'
+                      : `الحالة: تعطيل مؤقت مفعل حتى ${lockDisableUntilLabel}`
+                    : 'الحالة: الأقفال مفعلة بشكل طبيعي'}
+                </p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+                <ICONS.ShieldCheck className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+              <button
+                type="button"
+                onClick={() => setTemporaryLockDisable(15)}
+                disabled={isProcessing}
+                className="py-2 rounded-xl bg-white border border-rose-200 text-rose-700 text-xs font-black disabled:opacity-50"
+              >
+                تعطيل 15 دقيقة
+              </button>
+              <button
+                type="button"
+                onClick={() => setTemporaryLockDisable(60)}
+                disabled={isProcessing}
+                className="py-2 rounded-xl bg-white border border-rose-200 text-rose-700 text-xs font-black disabled:opacity-50"
+              >
+                تعطيل 60 دقيقة
+              </button>
+              <button
+                type="button"
+                onClick={() => setTemporaryLockDisable(480)}
+                disabled={isProcessing}
+                className="py-2 rounded-xl bg-white border border-rose-200 text-rose-700 text-xs font-black disabled:opacity-50"
+              >
+                تعطيل 8 ساعات
+              </button>
+              <button
+                type="button"
+                onClick={() => void requireStepUp('SENSITIVE_SETTINGS', togglePermanentLockDisable)}
+                disabled={isProcessing}
+                className={`py-2 rounded-xl text-xs font-black disabled:opacity-50 ${
+                  isLockDisablePermanentActive
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-rose-600 text-white'
+                }`}
+              >
+                {isLockDisablePermanentActive ? 'إلغاء التعطيل الدائم' : 'تعطيل دائم'}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => void requireStepUp('SENSITIVE_SETTINGS', reactivateAllLocks)}
+              disabled={isProcessing || !isAllLocksDisableActive}
+              className="w-full py-2 rounded-xl bg-emerald-600 text-white text-xs font-black disabled:opacity-40"
+            >
+              إعادة تفعيل جميع الأقفال الآن
+            </button>
           </div>
 
         </div>
@@ -1425,11 +2409,17 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </section>
 
-      {/* 8. تنظيف البيانات */}
+      {/* 8. Sensitive Actions Zone */}
       <section className="bg-red-50 rounded-[2.5rem] p-8 border-2 border-dashed border-red-200 flex flex-col md:flex-row justify-between items-center gap-6">
         <div className="text-right">
-          <h3 className="text-xl font-black text-red-900">تنظيف البيانات</h3>
-          <p className="text-red-600 font-bold text-xs">حذف كافة الأجهزة الوهمية تماماً.</p>
+          <h3 className="text-xl font-black text-red-900">
+            {lang === 'ar' ? 'منطقة الإجراءات الحساسة' : 'Sensitive Actions Zone'}
+          </h3>
+          <p className="text-red-600 font-bold text-xs">
+            {lang === 'ar'
+              ? 'سجّل خروجك بأمان أو احذف كل البيانات الوهمية دفعة واحدة (لا يشمل بياناتك الحقيقية).'
+              : 'Sign out safely or purge all mock data at once (real data is not affected).'}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -1439,7 +2429,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             disabled={isProcessing}
             className="px-8 py-4 bg-white text-slate-700 rounded-2xl font-black text-xs shadow-lg border border-slate-200"
           >
-            تسجيل الخروج
+            {lang === 'ar' ? 'تسجيل الخروج' : 'Sign out'}
           </button>
           <button
             type="button"
@@ -1447,14 +2437,20 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             disabled={isProcessing}
             className="px-8 py-4 bg-red-600 text-white rounded-2xl font-black text-xs shadow-lg"
           >
-            حذف البيانات
+            {lang === 'ar' ? 'حذف كل البيانات الوهمية' : 'Delete all mock data'}
           </button>
         </div>
         {pendingDelete?.kind === 'purge' && pendingDelete.source === 'purge' && (
           <div className="w-full md:w-auto md:min-w-[520px]">
             <InlineDangerConfirm
-              message="حذف نهائي لكل بيانات الحساب والأجهزة؟"
-              confirmLabel="نعم، احذف الكل"
+              message={
+                lang === 'ar'
+                  ? 'هل تريد حذف كل البيانات الوهمية الآن؟'
+                  : 'Do you want to delete all mock data now?'
+              }
+              confirmLabel={
+                lang === 'ar' ? 'نعم، احذف البيانات الوهمية' : 'Yes, delete mock data'
+              }
               onConfirm={() => {
                 void requireStepUp('SENSITIVE_SETTINGS', handleConfirmDelete);
               }}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, Suspense, useMemo, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   Child,
@@ -227,6 +227,29 @@ const IntegrationPlaceholder: React.FC<{
   </div>
 );
 
+const applyNestedUpdates = <T extends Record<string, any>>(source: T, updates: Record<string, any>): T => {
+  const next: Record<string, any> = { ...source };
+  for (const [rawKey, value] of Object.entries(updates || {})) {
+    if (!rawKey.includes('.')) {
+      next[rawKey] = value;
+      continue;
+    }
+    const parts = rawKey.split('.');
+    let cursor: Record<string, any> = next;
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      const part = parts[i];
+      const existing = cursor[part];
+      cursor[part] =
+        existing && typeof existing === 'object' && !Array.isArray(existing)
+          ? { ...existing }
+          : {};
+      cursor = cursor[part];
+    }
+    cursor[parts[parts.length - 1]] = value;
+  }
+  return next as T;
+};
+
 const App: React.FC = () => {
   const navigate = useNavigate();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -286,6 +309,51 @@ const App: React.FC = () => {
       activeDays: [0, 1, 2, 3, 4, 5, 6],
     },
   ]);
+  const [lockNowTs, setLockNowTs] = useState(Date.now());
+
+  const allLocksDisabledUntilTs = Number(currentUser.enabledFeatures?.allLocksDisabledUntil || 0);
+  const allLocksDisabledTemporarily = allLocksDisabledUntilTs > lockNowTs;
+  const allLocksDisabledPermanently =
+    currentUser.enabledFeatures?.allLocksDisabledPermanently === true;
+  const allLocksDisabled = allLocksDisabledPermanently || allLocksDisabledTemporarily;
+  const autoLockInAutomationEnabled = currentUser.enabledFeatures?.autoLockInAutomation !== false;
+  const lockBypassUnlockedChildrenRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setLockNowTs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!allLocksDisabled) {
+      lockBypassUnlockedChildrenRef.current.clear();
+      return;
+    }
+    const pendingChildren = children.filter(
+      (child) => !lockBypassUnlockedChildrenRef.current.has(child.id)
+    );
+    if (pendingChildren.length === 0) return;
+    pendingChildren.forEach((child) => lockBypassUnlockedChildrenRef.current.add(child.id));
+
+    setChildren((prev) =>
+      prev.map((child) =>
+        pendingChildren.some((pending) => pending.id === child.id)
+          ? { ...child, deviceLocked: false }
+          : child
+      )
+    );
+    void Promise.allSettled(
+      pendingChildren.map(async (child) => {
+        await sendRemoteCommand(child.id, 'lockDevice', false);
+        await sendRemoteCommand(child.id, 'lockscreenBlackout', {
+          enabled: false,
+          message: '',
+          source: 'global_lock_bypass',
+        });
+        await updateMemberInDB(child.id, 'CHILD', { deviceLocked: false });
+      })
+    );
+  }, [allLocksDisabled, children]);
 
   const handleAcceptSuggestedMode = (plan: Partial<CustomMode>) => {
     const nextMode: CustomMode = {
@@ -384,6 +452,8 @@ const App: React.FC = () => {
     const targetMode = modes.find((mode) => mode.id === modeId);
     const targetChild = children.find((child) => child.id === childId);
     if (!targetMode || !targetChild) return;
+    const shouldLockDevice = targetMode.isDeviceLocked && !allLocksDisabled;
+    const shouldBlackout = !!targetMode.blackoutOnApply && !allLocksDisabled;
 
     const allowList = new Set(
       (targetMode.allowedApps || []).map((name) => name.toLowerCase().replace(/\s+/g, ' ').trim())
@@ -400,7 +470,7 @@ const App: React.FC = () => {
 
     const changedApps = nextAppUsage.filter((app) => previousBlockByApp.get(app.id) !== app.isBlocked);
     const patch: Partial<Child> = {
-      deviceLocked: targetMode.isDeviceLocked,
+      deviceLocked: shouldLockDevice,
       cameraBlocked: !targetMode.cameraEnabled,
       micBlocked: !targetMode.micEnabled,
       appUsage: nextAppUsage,
@@ -409,9 +479,9 @@ const App: React.FC = () => {
     setChildren((prev) => prev.map((child) => (child.id === childId ? { ...child, ...patch } : child)));
     await handleUpdateMember(childId, 'CHILD', patch);
 
-    const commandQueue: Promise<any>[] = [sendRemoteCommand(childId, 'lockDevice', targetMode.isDeviceLocked)];
+    const commandQueue: Promise<any>[] = [sendRemoteCommand(childId, 'lockDevice', shouldLockDevice)];
 
-    if (targetMode.blackoutOnApply) {
+    if (shouldBlackout) {
       commandQueue.push(
         sendRemoteCommand(childId, 'lockscreenBlackout', {
           enabled: true,
@@ -421,6 +491,14 @@ const App: React.FC = () => {
               ? 'تم قفل الجهاز لدواعي الأمان. يرجى التواصل مع الوالدين.'
               : 'Device locked for safety. Please contact a parent.'),
           source: 'mode_apply',
+        })
+      );
+    } else if (targetMode.blackoutOnApply && allLocksDisabled) {
+      commandQueue.push(
+        sendRemoteCommand(childId, 'lockscreenBlackout', {
+          enabled: false,
+          message: '',
+          source: 'mode_apply_lock_bypass',
         })
       );
     }
@@ -555,7 +633,7 @@ const App: React.FC = () => {
     try {
       await updateMemberInDB(id, role, updates);
       if (id === currentUser.id) {
-        setCurrentUser((prev) => ({ ...prev, ...updates }));
+        setCurrentUser((prev) => applyNestedUpdates(prev, updates || {}));
       }
       logUserActivity(currentUser.id, {
         action: 'تحديث بيانات',
@@ -572,6 +650,25 @@ const App: React.FC = () => {
     config: ProactiveDefenseConfig
   ) => {
     await handleUpdateMember(childId, 'CHILD', { defenseConfig: config });
+  };
+
+  const handleDeleteMember = async (id: string, role: UserRole) => {
+    try {
+      await deleteMemberFromDB(id, role);
+
+      if (role === 'CHILD') {
+        setChildren((prev) => prev.filter((child) => child.id !== id));
+      }
+
+      await logUserActivity(currentUser.id, {
+        action: 'Delete member',
+        details: `Deleted ${role} (${id})`,
+        type: 'WARNING',
+      });
+    } catch (error) {
+      console.error('Failed to delete member:', error);
+      throw error;
+    }
   };
 
   const handleRotatePairingKey = async (): Promise<string | undefined> => {
@@ -658,6 +755,36 @@ const App: React.FC = () => {
   };
 
   const handleToggleDeviceLock = async (childId: string, shouldLock: boolean) => {
+    if (allLocksDisabled) {
+      setChildren((prev) =>
+        prev.map((child) => (child.id === childId ? { ...child, deviceLocked: false } : child))
+      );
+      await handleUpdateMember(childId, 'CHILD', { deviceLocked: false });
+      await sendRemoteCommand(childId, 'lockDevice', false);
+      await sendRemoteCommand(childId, 'lockscreenBlackout', {
+        enabled: false,
+        message: '',
+        source: 'global_lock_bypass',
+      });
+      setActiveToast({
+        id: `lock-bypass-${Date.now()}`,
+        childName: 'Amanah AI',
+        platform: 'Device Controls',
+        content:
+          lang === 'ar'
+            ? 'تم تعطيل جميع الأقفال من الإعدادات (مؤقت/دائم).'
+            : 'All lock commands are disabled by settings (temporary/permanent).',
+        category: Category.SAFE,
+        severity: AlertSeverity.LOW,
+        timestamp: new Date(),
+        aiAnalysis:
+          lang === 'ar'
+            ? 'تم تجاهل أمر القفل وتنفيذ فك القفل الوقائي.'
+            : 'Lock request was skipped and an unlock command was enforced.',
+      });
+      return;
+    }
+
     if (shouldLock) {
       await handleUpdateMember(childId, 'CHILD', { preventDeviceLock: false });
     }
@@ -898,6 +1025,8 @@ const App: React.FC = () => {
                     children={children}
                     lang={lang}
                     parentId={currentUser.id}
+                    autoLockInAutomationEnabled={autoLockInAutomationEnabled}
+                    allLocksDisabled={allLocksDisabled}
                     onUpdateDefense={handleUpdateDefense}
                   />
                 ) : (
@@ -1111,7 +1240,19 @@ const App: React.FC = () => {
               path="/live"
               element={
                 FEATURE_FLAGS.liveMonitor ? (
-                  <LiveMonitorView children={children} lang={lang} />
+                  <LiveMonitorView
+                    children={children}
+                    lang={lang}
+                    allLocksDisabled={allLocksDisabled}
+                    lockDisableMode={
+                      allLocksDisabledPermanently
+                        ? 'permanent'
+                        : allLocksDisabledTemporarily
+                          ? 'temporary'
+                          : 'none'
+                    }
+                    lockDisableUntilTs={allLocksDisabledTemporarily ? allLocksDisabledUntilTs : undefined}
+                  />
                 ) : (
                   <Navigate to="/" replace />
                 )
@@ -1143,6 +1284,8 @@ const App: React.FC = () => {
                     theme="light"
                     child={children[0]}
                     alerts={alerts}
+                    autoLockInAutomationEnabled={autoLockInAutomationEnabled}
+                    allLocksDisabled={allLocksDisabled}
                     onAcceptPlan={handleAcceptSuggestedMode}
                     onApplyModeToChild={handleApplyMode}
                     onPlanExecutionResult={handlePlanExecutionResult}
@@ -1166,7 +1309,7 @@ const App: React.FC = () => {
                     children={children}
                     lang={lang}
                     onUpdateMember={handleUpdateMember}
-                    onDeleteMember={(id, role) => deleteMemberFromDB(id, role)}
+                    onDeleteMember={handleDeleteMember}
                     onAddChild={async (data) => {
                       await addChildToDB(currentUser.id, data);
                     }}

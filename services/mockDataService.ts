@@ -13,7 +13,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { AlertSeverity, Category } from '../types';
-import { db } from './firebaseConfig';
+import { canUseMockData, db } from './firebaseConfig';
 
 export type MockDataDomain =
   | 'children'
@@ -35,6 +35,79 @@ export const MOCK_DATA_DOMAINS: MockDataDomain[] = [
 ];
 
 const MOCK_TAG = 'AMANAH_FAKE_DATA';
+
+const ensureMockOpsAllowed = (context: string) => {
+  if (canUseMockData()) return;
+  console.warn(`[MockData] ${context}: blocked because emulator is not enabled.`);
+  throw new Error('MOCK_DATA_DISABLED');
+};
+
+const isPermissionDeniedError = (error: any): boolean => {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  const raw = String(error || '');
+  return (
+    code === 'permission-denied' ||
+    message.includes('Missing or insufficient permissions') ||
+    raw.includes('Missing or insufficient permissions') ||
+    raw.includes('permission-denied')
+  );
+};
+
+const runMutationBatch = async (
+  mutations: Array<() => Promise<unknown>>,
+  context: string
+): Promise<number> => {
+  if (mutations.length === 0) return 0;
+  const settled = await Promise.allSettled(mutations.map((mutation) => mutation()));
+
+  let success = 0;
+  const hardFailures: any[] = [];
+
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      success += 1;
+      continue;
+    }
+
+    if (isPermissionDeniedError(result.reason)) {
+      console.warn(`[MockData] ${context}: skipped one mutation due to permission-denied.`);
+      continue;
+    }
+
+    hardFailures.push(result.reason);
+  }
+
+  if (hardFailures.length > 0) {
+    throw hardFailures[0];
+  }
+
+  return success;
+};
+
+const safeGetDocs = async (queryRef: any, context: string) => {
+  try {
+    return await getDocs(queryRef);
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      console.warn(`[MockData] ${context}: skipped read due to permission-denied.`);
+      return { docs: [] } as any;
+    }
+    throw error;
+  }
+};
+
+const safeGetDoc = async (docRef: any, context: string) => {
+  try {
+    return await getDoc(docRef);
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      console.warn(`[MockData] ${context}: skipped read due to permission-denied.`);
+      return { exists: () => false, data: () => undefined } as any;
+    }
+    throw error;
+  }
+};
 
 const MOCK_CHILD_TEMPLATES = [
   {
@@ -258,22 +331,22 @@ const createMockPsychProfile = () => {
 
 const listChildrenByParent = async (parentId: string) => {
   const q = query(collection(db!, 'children'), where('parentId', '==', parentId));
-  return getDocs(q);
+  return safeGetDocs(q, 'list mock children');
 };
 
 const listSupervisorsByParent = async (parentId: string) => {
   const q = query(collection(db!, 'supervisors'), where('parentId', '==', parentId));
-  return getDocs(q);
+  return safeGetDocs(q, 'list mock supervisors');
 };
 
 const listAlertsByParent = async (parentId: string) => {
   const q = query(collection(db!, 'alerts'), where('parentId', '==', parentId));
-  return getDocs(q);
+  return safeGetDocs(q, 'list mock alerts');
 };
 
 const listActivitiesByParent = async (parentId: string) => {
   const q = query(collection(db!, 'activities'), where('parentId', '==', parentId));
-  return getDocs(q);
+  return safeGetDocs(q, 'list mock activities');
 };
 
 const ensureMockChildren = async (parentId: string, minCount: number) => {
@@ -341,6 +414,7 @@ export const injectSelectedMockData = async (
   parentId: string,
   domains: MockDataDomain[]
 ): Promise<Record<MockDataDomain, number>> => {
+  ensureMockOpsAllowed('inject mock data');
   if (!db || !parentId) {
     return {
       children: 0,
@@ -494,6 +568,7 @@ export const clearSelectedMockData = async (
   parentId: string,
   domains: MockDataDomain[]
 ): Promise<Record<MockDataDomain, number>> => {
+  ensureMockOpsAllowed('clear mock data');
   if (!db || !parentId) {
     return {
       children: 0,
@@ -521,93 +596,118 @@ export const clearSelectedMockData = async (
   const mockChildren = childrenSnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
 
   if (selected.has('children')) {
-    await Promise.all(mockChildren.map((d) => deleteDoc(doc(db, 'children', d.id))));
-    result.children = mockChildren.length;
+    result.children = await runMutationBatch(
+      mockChildren.map((d) => () => deleteDoc(doc(db, 'children', d.id))),
+      'clear mock children'
+    );
   } else {
     if (selected.has('devices')) {
-      await Promise.all(
-        mockChildren.map((d) =>
-          updateDoc(doc(db, 'children', d.id), {
-            deviceNickname: deleteField(),
-            deviceOwnerUid: deleteField(),
-            appUsage: [],
-            batteryLevel: 100,
-            signalStrength: 4,
-            status: 'offline',
-          })
-        )
+      result.devices = await runMutationBatch(
+        mockChildren.map(
+          (d) => () =>
+            updateDoc(doc(db, 'children', d.id), {
+              deviceNickname: deleteField(),
+              deviceOwnerUid: deleteField(),
+              appUsage: [],
+              batteryLevel: 100,
+              signalStrength: 4,
+              status: 'offline',
+            })
+        ),
+        'clear mock device fields'
       );
-      result.devices = mockChildren.length;
     }
 
     if (selected.has('timings')) {
-      await Promise.all(
-        mockChildren.map((d) =>
-          updateDoc(doc(db, 'children', d.id), {
-            screenTimeLimit: 0,
-            currentScreenTime: 0,
-          })
-        )
+      result.timings = await runMutationBatch(
+        mockChildren.map(
+          (d) => () =>
+            updateDoc(doc(db, 'children', d.id), {
+              screenTimeLimit: 0,
+              currentScreenTime: 0,
+            })
+        ),
+        'clear mock timing fields'
       );
-      result.timings = mockChildren.length;
     }
 
     if (selected.has('psychPulse')) {
-      await Promise.all(
-        mockChildren.map((d) =>
-          updateDoc(doc(db, 'children', d.id), {
-            psychProfile: deleteField(),
-          })
-        )
+      result.psychPulse = await runMutationBatch(
+        mockChildren.map(
+          (d) => () =>
+            updateDoc(doc(db, 'children', d.id), {
+              psychProfile: deleteField(),
+            })
+        ),
+        'clear mock psych profile'
       );
-      result.psychPulse = mockChildren.length;
     }
   }
 
   if (selected.has('eventsAlerts')) {
     const alertsSnap = await listAlertsByParent(parentId);
     const mockAlerts = alertsSnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
-    await Promise.all(mockAlerts.map((d) => deleteDoc(doc(db, 'alerts', d.id))));
+    const removedAlerts = await runMutationBatch(
+      mockAlerts.map((d) => () => deleteDoc(doc(db, 'alerts', d.id))),
+      'clear mock alerts'
+    );
 
     const activitiesSnap = await listActivitiesByParent(parentId);
     const mockActivities = activitiesSnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
-    await Promise.all(mockActivities.map((d) => deleteDoc(doc(db, 'activities', d.id))));
+    const removedActivities = await runMutationBatch(
+      mockActivities.map((d) => () => deleteDoc(doc(db, 'activities', d.id))),
+      'clear mock activities'
+    );
 
-    result.eventsAlerts = mockAlerts.length + mockActivities.length;
+    result.eventsAlerts = removedAlerts + removedActivities;
   }
 
   if (selected.has('supervisors')) {
     const supervisorsSnap = await listSupervisorsByParent(parentId);
     const mockSup = supervisorsSnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
-    await Promise.all(mockSup.map((d) => deleteDoc(doc(db, 'supervisors', d.id))));
-    result.supervisors = mockSup.length;
+    result.supervisors = await runMutationBatch(
+      mockSup.map((d) => () => deleteDoc(doc(db, 'supervisors', d.id))),
+      'clear mock supervisors'
+    );
   }
 
   if (selected.has('operations')) {
     let removed = 0;
 
     const playbookRef = doc(db, 'playbooks', parentId);
-    const playbookSnap = await getDoc(playbookRef);
+    const playbookSnap = await safeGetDoc(playbookRef, 'read mock playbook');
     if (playbookSnap.exists() && playbookSnap.data()?.mockTag === MOCK_TAG) {
-      await updateDoc(playbookRef, {
-        mockTag: deleteField(),
-        playbooks: deleteField(),
-        updatedAt: deleteField(),
-      });
-      removed += 1;
+      try {
+        await updateDoc(playbookRef, {
+          mockTag: deleteField(),
+          playbooks: deleteField(),
+          updatedAt: deleteField(),
+        });
+        removed += 1;
+      } catch (error) {
+        if (isPermissionDeniedError(error)) {
+          console.warn('[MockData] clear playbook mock payload skipped due to permission-denied.');
+        } else {
+          throw error;
+        }
+      }
     }
 
     const custodyQ = query(collection(db, 'custody'), where('parentId', '==', parentId));
-    const custodySnap = await getDocs(custodyQ);
+    const custodySnap = await safeGetDocs(custodyQ, 'list mock custody');
     const mockCustody = custodySnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
-    await Promise.all(mockCustody.map((d) => deleteDoc(doc(db, 'custody', d.id))));
-    removed += mockCustody.length;
+    removed += await runMutationBatch(
+      mockCustody.map((d) => () => deleteDoc(doc(db, 'custody', d.id))),
+      'clear mock custody'
+    );
 
     const auditQ = query(collection(db, 'auditLogs'), where('parentId', '==', parentId));
-    const auditSnap = await getDocs(auditQ);
+    const auditSnap = await safeGetDocs(auditQ, 'list mock audit logs');
     const mockAudit = auditSnap.docs.filter((d) => d.data()?.mockTag === MOCK_TAG);
-    await Promise.all(mockAudit.map((d) => deleteDoc(doc(db, 'auditLogs', d.id))));
-    removed += mockAudit.length;
+    removed += await runMutationBatch(
+      mockAudit.map((d) => () => deleteDoc(doc(db, 'auditLogs', d.id))),
+      'clear mock audit logs'
+    );
 
     result.operations = removed;
   }
@@ -619,6 +719,7 @@ export const clearSelectedMockData = async (
  * Legacy: inject comprehensive test suite
  */
 export const injectMockSuite = async (parentId: string) => {
+  ensureMockOpsAllowed('inject mock suite');
   await injectSelectedMockData(parentId, [...MOCK_DATA_DOMAINS]);
 };
 
@@ -626,21 +727,14 @@ export const injectMockSuite = async (parentId: string) => {
  * Purge user data (legacy behavior)
  */
 export const clearAllUserData = async (parentId: string) => {
-  if (!db) return;
-
-  const collections = ['children', 'alerts', 'activities'];
-  for (const colName of collections) {
-    const q = query(collection(db, colName), where('parentId', '==', parentId));
-    const snap = await getDocs(q);
-    const deletePromises = snap.docs.map((d) => deleteDoc(doc(db, colName, d.id)));
-    await Promise.all(deletePromises);
-  }
+  throw new Error('clearAllUserData is disabled. Use clearSelectedMockData instead.');
 };
 
 /**
  * Legacy: randomize psych profile for all children
  */
 export const randomizePsychProfiles = async (parentId: string) => {
+  ensureMockOpsAllowed('randomize psych profiles');
   if (!db) return;
   const q = query(collection(db, 'children'), where('parentId', '==', parentId));
   const snap = await getDocs(q);
@@ -662,6 +756,7 @@ export const injectAdvancedOperationalMockData = async (parentId: string): Promi
   custody: number;
   auditLogs: number;
 }> => {
+  ensureMockOpsAllowed('inject advanced operational mock data');
   if (!db || !parentId) return { playbooks: 0, custody: 0, auditLogs: 0 };
 
   const playbookDocRef = doc(db, 'playbooks', parentId);

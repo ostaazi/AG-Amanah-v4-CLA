@@ -173,9 +173,48 @@ const ParentOpsConsoleView: React.FC<ParentOpsConsoleViewProps> = ({
     };
   }, [currentUser.id, selectedIncident?.incident_id]);
 
+  const allLocksDisabledUntilTs = Number(currentUser.enabledFeatures?.allLocksDisabledUntil || 0);
+  const allLocksDisabledTemporarily = allLocksDisabledUntilTs > Date.now();
+  const allLocksDisabledPermanently =
+    currentUser.enabledFeatures?.allLocksDisabledPermanently === true;
+  const allLocksDisabled = allLocksDisabledPermanently || allLocksDisabledTemporarily;
+  const lockDisableLabel =
+    lang === 'ar'
+      ? allLocksDisabledPermanently
+        ? 'تعطيل دائم مفعل من الإعدادات.'
+        : allLocksDisabledTemporarily
+          ? `تعطيل مؤقت مفعل حتى ${new Date(allLocksDisabledUntilTs).toLocaleString('ar-EG')}.`
+          : ''
+      : allLocksDisabledPermanently
+        ? 'Permanent lock disable is enabled from settings.'
+        : allLocksDisabledTemporarily
+          ? `Temporary lock disable is active until ${new Date(allLocksDisabledUntilTs).toLocaleString('en-US')}.`
+          : '';
+
   const onSendCommand = async (childId: string, command: string, payload?: any) => {
     const createdAt = new Date().toISOString();
     const commandId = `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const isLockCommand = command === 'lockDevice' || command === 'lockscreenBlackout';
+
+    if (allLocksDisabled && isLockCommand) {
+      await logAuditEvent(currentUser.id, {
+        command_id: commandId,
+        child_id: childId,
+        actor_user_id: currentUser.id,
+        actor_role: currentUser.role,
+        command_type: command,
+        payload: payload || true,
+        status: 'failed',
+        error_message:
+          lang === 'ar'
+            ? 'تم حظر أمر القفل لأن تعطيل جميع الأقفال مفعل.'
+            : 'Lock command blocked because all locks are disabled in settings.',
+        created_at: createdAt,
+        updated_at: createdAt,
+      });
+      return;
+    }
+
     await logAuditEvent(currentUser.id, {
       command_id: commandId,
       child_id: childId,
@@ -369,7 +408,13 @@ const ParentOpsConsoleView: React.FC<ParentOpsConsoleViewProps> = ({
           {tab === 'commands' && (
             <>
               <DeviceCommandsDashboard lang={lang} logs={logs} />
-              <DeviceCommandControl lang={lang} children={children} onSendCommand={onSendCommand} />
+              <DeviceCommandControl
+                lang={lang}
+                children={children}
+                onSendCommand={onSendCommand}
+                allLocksDisabled={allLocksDisabled}
+                lockDisableLabel={lockDisableLabel}
+              />
               <CommandsStatusTable lang={lang} logs={logs} />
             </>
           )}

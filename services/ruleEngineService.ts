@@ -14,6 +14,23 @@ export interface DefenseAction {
   priority: CommandPriority;
 }
 
+interface DefenseActionOptions {
+  allowAutoLock?: boolean;
+}
+
+const isAutoLockCommand = (command: string): boolean =>
+  command === 'lockDevice' || command === 'lockscreenBlackout';
+
+const filterDefenseActions = (
+  actions: DefenseAction[],
+  options: DefenseActionOptions
+): DefenseAction[] => {
+  if (options.allowAutoLock === false) {
+    return actions.filter((action) => !isAutoLockCommand(action.command));
+  }
+  return actions;
+};
+
 const severityWeight = (severity: AlertSeverity): number => {
   switch (severity) {
     case AlertSeverity.CRITICAL:
@@ -29,7 +46,8 @@ const severityWeight = (severity: AlertSeverity): number => {
 
 export const getDefenseActions = (
   category: Category,
-  severity: AlertSeverity
+  severity: AlertSeverity,
+  options: DefenseActionOptions = {}
 ): DefenseAction[] => {
   const weight = severityWeight(severity);
   const common: DefenseAction[] = [
@@ -42,7 +60,7 @@ export const getDefenseActions = (
   ];
 
   if (category === Category.PREDATOR || category === Category.SEXUAL_EXPLOITATION) {
-    return [
+    return filterDefenseActions([
       {
         id: 'lock',
         label: 'Emergency Lock',
@@ -82,11 +100,11 @@ export const getDefenseActions = (
         priority: CommandPriority.HIGH,
       },
       ...common,
-    ];
+    ], options);
   }
 
   if (category === Category.BULLYING) {
-    return [
+    return filterDefenseActions([
       {
         id: 'screenshot',
         label: 'Capture Screen',
@@ -102,11 +120,11 @@ export const getDefenseActions = (
         priority: weight >= 3 ? CommandPriority.HIGH : CommandPriority.MEDIUM,
       },
       ...common,
-    ];
+    ], options);
   }
 
   if (category === Category.SELF_HARM) {
-    return [
+    return filterDefenseActions([
       {
         id: 'lock',
         label: 'Safety Lock',
@@ -132,11 +150,11 @@ export const getDefenseActions = (
         priority: CommandPriority.HIGH,
       },
       ...common,
-    ];
+    ], options);
   }
 
   if (category === Category.BLACKMAIL) {
-    return [
+    return filterDefenseActions([
       {
         id: 'lock',
         label: 'Emergency Lock',
@@ -169,11 +187,11 @@ export const getDefenseActions = (
         priority: CommandPriority.HIGH,
       },
       ...common,
-    ];
+    ], options);
   }
 
   if (category === Category.SCAM) {
-    return [
+    return filterDefenseActions([
       {
         id: 'quarantine-net',
         label: 'Cut Internet Session',
@@ -189,11 +207,11 @@ export const getDefenseActions = (
         priority: CommandPriority.HIGH,
       },
       ...common,
-    ];
+    ], options);
   }
 
   if (category === Category.VIOLENCE) {
-    return [
+    return filterDefenseActions([
       {
         id: 'lock',
         label: 'Emergency Lock',
@@ -216,11 +234,11 @@ export const getDefenseActions = (
         priority: CommandPriority.HIGH,
       },
       ...common,
-    ];
+    ], options);
   }
 
   if (category === Category.TAMPER) {
-    return [
+    return filterDefenseActions([
       {
         id: 'lock',
         label: 'Containment Lock',
@@ -243,10 +261,10 @@ export const getDefenseActions = (
         priority: CommandPriority.HIGH,
       },
       ...common,
-    ];
+    ], options);
   }
 
-  return common;
+  return filterDefenseActions(common, options);
 };
 
 const severityWeightFromEnum = (severity: AlertSeverity): number => severityWeight(severity);
@@ -345,7 +363,8 @@ const mapPlaybookAction = (action: AutomatedAction): DefenseAction | null => {
 export const getPlaybookActions = (
   playbooks: SafetyPlaybook[],
   category: Category,
-  severity: AlertSeverity
+  severity: AlertSeverity,
+  options: DefenseActionOptions = {}
 ): DefenseAction[] => {
   const currentSeverityWeight = severityWeightFromEnum(severity);
   const eligible = playbooks.filter(
@@ -355,21 +374,25 @@ export const getPlaybookActions = (
       severityWeightFromEnum(pb.minSeverity) <= currentSeverityWeight
   );
 
-  return eligible.flatMap((pb) => pb.actions.map(mapPlaybookAction).filter(Boolean) as DefenseAction[]);
+  return filterDefenseActions(
+    eligible.flatMap((pb) => pb.actions.map(mapPlaybookAction).filter(Boolean) as DefenseAction[]),
+    options
+  );
 };
 
 export const getDefenseActionsWithPlaybooks = (
   category: Category,
   severity: AlertSeverity,
-  playbooks: SafetyPlaybook[] = []
+  playbooks: SafetyPlaybook[] = [],
+  options: DefenseActionOptions = {}
 ): DefenseAction[] => {
-  const base = getDefenseActions(category, severity);
-  const playbookActions = getPlaybookActions(playbooks, category, severity);
+  const base = getDefenseActions(category, severity, options);
+  const playbookActions = getPlaybookActions(playbooks, category, severity, options);
   const unique = new Map<string, DefenseAction>();
   [...playbookActions, ...base].forEach((action) => {
     if (!unique.has(action.command)) unique.set(action.command, action);
   });
-  return Array.from(unique.values()).sort((a, b) => {
+  return filterDefenseActions(Array.from(unique.values()), options).sort((a, b) => {
     const rank = {
       [CommandPriority.CRITICAL]: 4,
       [CommandPriority.HIGH]: 3,

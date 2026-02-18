@@ -11,6 +11,9 @@ type VoiceTone = 'calm' | 'agitated' | 'aggressive';
 interface LiveMonitorViewProps {
   children: Child[];
   lang: 'ar' | 'en';
+  allLocksDisabled?: boolean;
+  lockDisableMode?: 'none' | 'temporary' | 'permanent';
+  lockDisableUntilTs?: number;
 }
 
 interface TranscriptEntry {
@@ -88,7 +91,13 @@ const toneLabel = (tone: VoiceTone, t: any) => {
   return t.calm;
 };
 
-const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({ children, lang }) => {
+const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
+  children,
+  lang,
+  allLocksDisabled = false,
+  lockDisableMode = 'none',
+  lockDisableUntilTs,
+}) => {
   const t = translations[lang];
   const [selectedChildId, setSelectedChildId] = useState(children[0]?.id || '');
   const child = children.find((c) => c.id === selectedChildId) || children[0];
@@ -149,6 +158,12 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({ children, lang }) => 
     setIsWalkieChannelEnabled(false);
     setIsPushToTalk(false);
   }, [child?.id]);
+
+  useEffect(() => {
+    if (!allLocksDisabled) return;
+    setIsLockdown(false);
+    setIsBlackoutActive(false);
+  }, [allLocksDisabled]);
 
   useEffect(() => {
     if (!child || !child.parentId) return;
@@ -217,6 +232,7 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({ children, lang }) => 
 
   const toggleEmergencyLock = async () => {
     if (!child) return;
+    if (allLocksDisabled) return;
     const next = !isLockdown;
     setIsLockdown(next);
     if (next) {
@@ -368,6 +384,7 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({ children, lang }) => 
 
   const toggleBlackoutScreen = async () => {
     if (!child) return;
+    if (allLocksDisabled) return;
     const next = !isBlackoutActive;
     setIsBlackoutActive(next);
     await sendRemoteCommand(child.id, 'lockscreenBlackout', {
@@ -435,6 +452,7 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({ children, lang }) => 
           <div className="flex flex-wrap gap-3">
             <button
               onClick={toggleEmergencyLock}
+              disabled={allLocksDisabled}
               className={`px-6 py-3 rounded-2xl font-black text-sm transition-all active:scale-95 ${isLockdown ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'}`}
             >
               {isLockdown ? 'إلغاء القفل' : 'قفل الجهاز الآن'}
@@ -454,6 +472,7 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({ children, lang }) => 
             </button>
             <button
               onClick={toggleBlackoutScreen}
+              disabled={allLocksDisabled}
               className={`px-6 py-3 rounded-2xl font-black text-sm ${isBlackoutActive ? 'bg-violet-600 text-white' : 'bg-violet-50 text-violet-700'}`}
             >
               {lang === 'ar'
@@ -478,6 +497,18 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({ children, lang }) => 
             </button>
           </div>
         </div>
+
+        {allLocksDisabled && (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-black text-rose-700">
+            {lang === 'ar'
+              ? lockDisableMode === 'permanent'
+                ? 'تم تعطيل جميع الأقفال بشكل دائم من الإعدادات.'
+                : `تم تعطيل جميع الأقفال مؤقتًا${lockDisableUntilTs ? ` حتى ${new Date(lockDisableUntilTs).toLocaleString('ar-EG')}` : ''}.`
+              : lockDisableMode === 'permanent'
+                ? 'All locks are disabled permanently from settings.'
+                : `All locks are disabled temporarily${lockDisableUntilTs ? ` until ${new Date(lockDisableUntilTs).toLocaleString('en-US')}` : ''}.`}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-slate-50 rounded-2xl p-4 space-y-3">

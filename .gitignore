@@ -30,3 +30,9 @@ android/
 .env
 .env.local
 .env.*.local
+# backups
+phase_backups/
+*.tar
+*.zip
+*.7z
+*.bak
