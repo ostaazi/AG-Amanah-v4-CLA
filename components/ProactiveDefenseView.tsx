@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertSeverity,
   Category,
@@ -8,7 +8,7 @@ import {
   SafetyPlaybook,
 } from '../types';
 import { ICONS } from '../constants';
-import { getDefenseActionsWithPlaybooks } from '../services/ruleEngineService';
+import { DefenseAction, getDefenseActionsWithPlaybooks } from '../services/ruleEngineService';
 import { fetchPlaybooks, sendRemoteCommand } from '../services/firestoreService';
 
 interface ProactiveDefenseViewProps {
@@ -39,6 +39,42 @@ const defaultDefenseConfig: ProactiveDefenseConfig = {
   sirenType: 'DEFAULT',
 };
 
+const cloneDefenseConfig = (config: ProactiveDefenseConfig): ProactiveDefenseConfig => ({
+  ...config,
+  onTextThreat: { ...config.onTextThreat },
+  onVisualThreat: { ...config.onVisualThreat },
+});
+
+const applyConfigToDefenseActions = (
+  actions: DefenseAction[],
+  config: ProactiveDefenseConfig
+): DefenseAction[] => {
+  if (!config.isEnabled) return [];
+
+  const allowLock = config.onTextThreat.lockDevice || config.onVisualThreat.lockDevice;
+  const allowSiren = config.onTextThreat.triggerSiren || config.onVisualThreat.triggerSiren;
+  const allowHardwareBlock = config.onVisualThreat.blockCamera || config.onVisualThreat.blockMic;
+
+  return actions.filter((action) => {
+    if ((action.command === 'lockDevice' || action.command === 'lockscreenBlackout') && !allowLock) {
+      return false;
+    }
+    if (action.command === 'blockApp' && !config.onTextThreat.blockApp) {
+      return false;
+    }
+    if (action.command === 'notifyParent' && !config.onTextThreat.sendWarning) {
+      return false;
+    }
+    if (action.command === 'playSiren' && !allowSiren) {
+      return false;
+    }
+    if (action.command === 'blockCameraAndMic' && !allowHardwareBlock) {
+      return false;
+    }
+    return true;
+  });
+};
+
 const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
   children,
   lang,
@@ -51,7 +87,10 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<Category>(Category.PREDATOR);
   const [selectedSeverity, setSelectedSeverity] = useState<AlertSeverity>(AlertSeverity.HIGH);
   const [isApplying, setIsApplying] = useState(false);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [lastRunSummary, setLastRunSummary] = useState('');
+  const [saveNotice, setSaveNotice] = useState('');
+  const [configError, setConfigError] = useState('');
   const [playbooks, setPlaybooks] = useState<SafetyPlaybook[]>([]);
 
   const selectedChild = useMemo(
@@ -59,14 +98,35 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
     [children, selectedChildId]
   );
 
-  const config = selectedChild?.defenseConfig || defaultDefenseConfig;
-  const actions = useMemo(
-    () =>
-      getDefenseActionsWithPlaybooks(selectedCategory, selectedSeverity, playbooks, {
-        allowAutoLock: autoLockInAutomationEnabled && !allLocksDisabled,
-      }),
-    [allLocksDisabled, autoLockInAutomationEnabled, playbooks, selectedCategory, selectedSeverity]
+  const persistedConfig = useMemo(
+    () => cloneDefenseConfig(selectedChild?.defenseConfig || defaultDefenseConfig),
+    [selectedChild?.id, selectedChild?.defenseConfig]
   );
+  const [config, setConfig] = useState<ProactiveDefenseConfig>(persistedConfig);
+  const isDirty = useMemo(
+    () => JSON.stringify(config) !== JSON.stringify(persistedConfig),
+    [config, persistedConfig]
+  );
+
+  useEffect(() => {
+    setConfig(persistedConfig);
+    setConfigError('');
+    setSaveNotice('');
+  }, [persistedConfig]);
+
+  const actions = useMemo(() => {
+    const baseActions = getDefenseActionsWithPlaybooks(selectedCategory, selectedSeverity, playbooks, {
+        allowAutoLock: autoLockInAutomationEnabled && !allLocksDisabled,
+      });
+    return applyConfigToDefenseActions(baseActions, config);
+  }, [
+    allLocksDisabled,
+    autoLockInAutomationEnabled,
+    config,
+    playbooks,
+    selectedCategory,
+    selectedSeverity,
+  ]);
 
   useEffect(() => {
     let mounted = true;
@@ -124,9 +184,44 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
     );
   }
 
-  const patchConfig = async (patch: Partial<ProactiveDefenseConfig>) => {
-    const next = { ...config, ...patch };
-    await onUpdateDefense(selectedChild.id, next);
+  const patchConfig = (patch: Partial<ProactiveDefenseConfig>) => {
+    setConfig((prev) => ({
+      ...prev,
+      ...patch,
+      onTextThreat: patch.onTextThreat
+        ? { ...prev.onTextThreat, ...patch.onTextThreat }
+        : prev.onTextThreat,
+      onVisualThreat: patch.onVisualThreat
+        ? { ...prev.onVisualThreat, ...patch.onVisualThreat }
+        : prev.onVisualThreat,
+    }));
+    setConfigError('');
+    setSaveNotice('');
+  };
+
+  const saveConfig = async () => {
+    if (!selectedChild || isSavingConfig) return;
+    if (!isDirty) {
+      setSaveNotice(lang === 'ar' ? 'لا توجد تغييرات جديدة للحفظ.' : 'No new changes to save.');
+      return;
+    }
+    setIsSavingConfig(true);
+    setConfigError('');
+    setSaveNotice('');
+    try {
+      await onUpdateDefense(selectedChild.id, config);
+      setSaveNotice(
+        lang === 'ar' ? 'تم حفظ إعدادات الدفاع الاستباقي بنجاح.' : 'Proactive defense settings saved.'
+      );
+    } catch (error: any) {
+      setConfigError(
+        lang === 'ar'
+          ? `فشل حفظ إعدادات الدفاع: ${String(error?.message || 'خطأ غير معروف')}`
+          : `Failed to save defense settings: ${String(error?.message || 'Unknown error')}`
+      );
+    } finally {
+      setIsSavingConfig(false);
+    }
   };
 
   const runActionsNow = async () => {
@@ -363,10 +458,15 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
 
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={() => onUpdateDefense(selectedChild.id, config)}
-            className="px-5 py-3 rounded-xl bg-indigo-600 text-white font-black text-sm shadow"
+            onClick={saveConfig}
+            disabled={isSavingConfig}
+            className="px-5 py-3 rounded-xl bg-indigo-600 text-white font-black text-sm shadow disabled:opacity-50"
           >
-            {t.save}
+            {isSavingConfig
+              ? lang === 'ar'
+                ? 'جارٍ الحفظ...'
+                : 'Saving...'
+              : t.save}
           </button>
           <button
             onClick={runActionsNow}
@@ -379,6 +479,16 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
         {lastRunSummary && (
           <div className="text-xs font-black text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
             {lastRunSummary}
+          </div>
+        )}
+        {configError && (
+          <div className="text-xs font-black text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+            {configError}
+          </div>
+        )}
+        {!!saveNotice && !configError && (
+          <div className="text-xs font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+            {saveNotice}
           </div>
         )}
       </section>
@@ -409,3 +519,4 @@ const ToggleRow: React.FC<{ label: string; checked: boolean; onToggle: () => voi
 );
 
 export default ProactiveDefenseView;
+

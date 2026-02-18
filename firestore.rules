@@ -105,10 +105,20 @@ service cloud.firestore {
     }
 
     match /pairingKeys/{key} {
-      allow get: if true;
+      // Phase 1 Security: Require authentication for pairing key lookup
+      allow get: if isAuthenticated();
       allow list: if false;
       allow create: if requestParentMatchesAuth();
       allow update, delete: if resourceParentMatchesAuth();
+    }
+
+    match /parentMessages/{messageId} {
+      allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+      allow read: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid
+        || resource.data.childId == request.auth.uid
+      );
+      allow delete: if isAuthenticated() && resource.data.senderId == request.auth.uid;
     }
   }
 }

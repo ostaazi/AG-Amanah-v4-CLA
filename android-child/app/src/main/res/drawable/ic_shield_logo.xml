@@ -1,0 +1,33 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="240"
+    android:viewportHeight="240">
+    <!-- جسم الدرع العنابي الرسمي بلمسة فنية -->
+    <path
+        android:pathData="M120,18 C147,25 173,35 192,46 C194,48 196,50 196,54 L196,122 C196,172 163,208 120,226 C77,208 44,172 44,122 L44,54 C44,50 46,48 48,46 C67,35 93,25 120,18 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="120"
+                android:startY="18"
+                android:endX="120"
+                android:endY="226"
+                android:type="linear">
+                <item android:offset="0" android:color="#8A1538" />
+                <item android:offset="1" android:color="#5E0D25" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- إطار ذهبي لامع -->
+    <path
+        android:strokeColor="#D1A23D"
+        android:strokeWidth="4"
+        android:pathData="M120,18 C147,25 173,35 192,46 C194,48 196,50 196,54 L196,122 C196,172 163,208 120,226 C77,208 44,172 44,122 L44,54 C44,50 46,48 48,46 C67,35 93,25 120,18 Z" />
+    <!-- خطوط داخلية جمالية -->
+    <path
+        android:strokeColor="#D1A23D"
+        android:strokeWidth="1"
+        android:alpha="0.3"
+        android:pathData="M70,80 L170,80 M120,40 L120,200" />
+</vector>

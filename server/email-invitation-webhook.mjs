@@ -102,7 +102,7 @@ const buildInvitationHtml = ({ inviterName, appUrl }) => {
 <!-- Header -->
 <tr>
 <td style="background:linear-gradient(135deg,#B83A60,#8A1538,#3A0715);padding:44px 32px;text-align:center;">
-  <div style="width:72px;height:72px;margin:0 auto 16px;background:linear-gradient(180deg,#FFF8D8,#D4A84B,#7A4D0A);border-radius:18px;display:flex;align-items:center;justify-content:center;line-height:72px;font-size:40px;box-shadow:0 4px 20px rgba(122,77,10,0.3);">🛡️</div>
+  <img src="https://amanah.qsmartlabs.com/android-chrome-192.png" alt="أمانة" width="72" height="72" style="display:block;margin:0 auto 16px;border-radius:18px;box-shadow:0 4px 20px rgba(122,77,10,0.3);" />
   <h1 style="margin:0;color:#ffffff;font-size:30px;font-weight:800;letter-spacing:1px;">أمانة</h1>
   <p style="margin:10px 0 0;color:rgba(255,255,255,0.80);font-size:14px;letter-spacing:0.5px;">حماية ذكية لعائلتك</p>
 </td>
@@ -111,7 +111,7 @@ const buildInvitationHtml = ({ inviterName, appUrl }) => {
 <!-- Body -->
 <tr>
 <td style="padding:40px 32px;">
-  <h2 style="margin:0 0 16px;color:#1e293b;font-size:22px;font-weight:700;">مرحباً بكِ 👋</h2>
+  <h2 style="margin:0 0 16px;color:#1e293b;font-size:22px;font-weight:700;">أهلاً وسهلاً</h2>
   <p style="margin:0 0 24px;color:#475569;font-size:16px;line-height:1.8;">
     لقد دعاكِ <strong style="color:#8A1538;">${safeInviter}</strong> للانضمام إلى تطبيق
     <strong>أمانة</strong> لمتابعة سلامة أطفالكم الرقمية معاً.
@@ -149,7 +149,7 @@ const buildInvitationHtml = ({ inviterName, appUrl }) => {
 
   <p style="margin:0;color:#94a3b8;font-size:12px;text-align:center;line-height:1.6;">
     إذا لم تكوني تتوقعين هذه الدعوة، يمكنكِ تجاهل هذا البريد بأمان.<br/>
-    <span style="color:#8A1538;">أمانة</span> – حماية ذكية لعائلتك 🛡️
+    <span style="color:#8A1538;">أمانة</span> – حماية ذكية لعائلتك
   </p>
 </td>
 </tr>
@@ -164,7 +164,7 @@ const buildInvitationHtml = ({ inviterName, appUrl }) => {
 const buildPlainText = ({ inviterName, appUrl }) => {
   const inviter = inviterName || 'أحد الوالدين';
   return [
-    `مرحباً بكِ!`,
+    `أهلاً وسهلاً!`,
     ``,
     `لقد دعاكِ ${inviter} للانضمام إلى تطبيق أمانة للرقابة الأبوية.`,
     ``,
@@ -320,7 +320,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const subject = `دعوة للانضمام إلى تطبيق أمانة 🛡️`;
+    const subject = `دعوة للانضمام إلى تطبيق أمانة`;
     const html = buildInvitationHtml({ inviterName, appUrl });
     const text = buildPlainText({ inviterName, appUrl });
 

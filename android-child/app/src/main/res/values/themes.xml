@@ -1,0 +1,13 @@
+<resources>
+    <style name="Theme.AmanahChild" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Primary brand color. -->
+        <item name="colorPrimary">#D1A23D</item>
+        <item name="colorPrimaryVariant">#050510</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">#D1A23D</item>
+        <item name="colorOnSecondary">#000000</item>
+        <!-- Status bar color. -->
+        <item name="android:statusBarColor">#050510</item>
+    </style>
+</resources>

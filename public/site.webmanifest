@@ -1,0 +1,29 @@
+{
+  "id": "amanah-pwa",
+  "name": "أمانة - الرقابة الأبوية الذكية",
+  "short_name": "أمانة",
+  "description": "تطبيق أمانة للرقابة الأبوية الذكية - حماية أطفالك بالذكاء الاصطناعي",
+  "icons": [
+    {
+      "src": "/android-chrome-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/android-chrome-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "theme_color": "#8A1538",
+  "background_color": "#3A0715",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "start_url": "/",
+  "dir": "rtl",
+  "lang": "ar",
+  "categories": ["education", "parenting", "security"]
+}

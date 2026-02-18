@@ -8,7 +8,28 @@
       "Bash(npm run lint)",
       "Bash(npx vitest:*)",
       "Bash(npm run test:run:*)",
-      "Bash(npm run type-check:*)"
+      "Bash(npm run type-check:*)",
+      "Bash(npx tsc:*)",
+      "Bash(timeout 3 node:*)",
+      "Bash(taskkill:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(more:*)",
+      "Bash(npx vite build)",
+      "Bash(npm install:*)",
+      "Bash(java -version:*)",
+      "Bash(where javac:*)",
+      "Bash(gradle --version:*)",
+      "Bash(dir:*)",
+      "Bash(node --version:*)",
+      "Bash(npx cap init:*)",
+      "Bash(npx cap:*)",
+      "Bash(move:*)",
+      "Bash(cmd /c \"rename android android-child\")",
+      "Bash(cmd /c \"dir /b d:\\\\Projects\\\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\\\android* 2>nul\")",
+      "Bash(robocopy:*)",
+      "Bash(cmd /c:*)",
+      "Bash(powershell:*)",
+      "Bash(ls:*)"
     ]
   }
 }

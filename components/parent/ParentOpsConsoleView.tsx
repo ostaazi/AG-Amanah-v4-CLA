@@ -15,7 +15,9 @@ import {
   logAuditEvent,
   sendRemoteCommand,
   subscribeToAuditLogs,
+  updateMemberInDB,
 } from '../../services/firestoreService';
+import { shouldBlockLockActivation } from '../../services/lockCommandPolicy';
 import { sovereignApi } from '../../services/sovereignApiService';
 import { buildEvidencePackageManifest } from '../../workers/evidencePackageWorker';
 import {
@@ -194,16 +196,23 @@ const ParentOpsConsoleView: React.FC<ParentOpsConsoleViewProps> = ({
   const onSendCommand = async (childId: string, command: string, payload?: any) => {
     const createdAt = new Date().toISOString();
     const commandId = `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const isLockCommand = command === 'lockDevice' || command === 'lockscreenBlackout';
+    const commandPayload = payload ?? true;
+    const safeAudit = async (event: Partial<DeviceCommandAudit>) => {
+      try {
+        await logAuditEvent(currentUser.id, event);
+      } catch (auditError) {
+        console.warn('Audit log write failed, command flow will continue:', auditError);
+      }
+    };
 
-    if (allLocksDisabled && isLockCommand) {
-      await logAuditEvent(currentUser.id, {
+    if (shouldBlockLockActivation(allLocksDisabled, command, commandPayload)) {
+      await safeAudit({
         command_id: commandId,
         child_id: childId,
         actor_user_id: currentUser.id,
         actor_role: currentUser.role,
         command_type: command,
-        payload: payload || true,
+        payload: commandPayload,
         status: 'failed',
         error_message:
           lang === 'ar'
@@ -215,43 +224,63 @@ const ParentOpsConsoleView: React.FC<ParentOpsConsoleViewProps> = ({
       return;
     }
 
-    await logAuditEvent(currentUser.id, {
+    await safeAudit({
       command_id: commandId,
       child_id: childId,
       actor_user_id: currentUser.id,
       actor_role: currentUser.role,
       command_type: command,
-      payload: payload || true,
+      payload: commandPayload,
       status: 'queued',
       created_at: createdAt,
       updated_at: createdAt,
     });
     try {
-      await sendRemoteCommand(childId, command, payload ?? true);
-      await logAuditEvent(currentUser.id, {
+      await sendRemoteCommand(childId, command, commandPayload);
+      try {
+        if (command === 'lockDevice' && typeof commandPayload === 'boolean') {
+          const lockPatch: Record<string, any> = { deviceLocked: commandPayload };
+          if (commandPayload === true) {
+            lockPatch.preventDeviceLock = false;
+          }
+          await updateMemberInDB(childId, 'CHILD', lockPatch);
+        }
+        if (
+          command === 'lockscreenBlackout' &&
+          commandPayload &&
+          typeof commandPayload === 'object' &&
+          commandPayload.enabled === false
+        ) {
+          await updateMemberInDB(childId, 'CHILD', { deviceLocked: false });
+        }
+      } catch (syncError) {
+        console.warn('Lock state sync warning after command ack:', syncError);
+      }
+      await safeAudit({
         command_id: commandId,
         child_id: childId,
         actor_user_id: currentUser.id,
         actor_role: currentUser.role,
         command_type: command,
-        payload: payload || true,
+        payload: commandPayload,
         status: 'acked',
         created_at: createdAt,
         updated_at: new Date().toISOString(),
       });
     } catch (error: any) {
-      await logAuditEvent(currentUser.id, {
+      await safeAudit({
         command_id: commandId,
         child_id: childId,
         actor_user_id: currentUser.id,
         actor_role: currentUser.role,
         command_type: command,
-        payload: payload || true,
+        payload: commandPayload,
         status: 'failed',
         error_message: String(error?.message || 'Unknown error'),
         created_at: createdAt,
         updated_at: new Date().toISOString(),
       });
+      throw error;
     }
   };
 

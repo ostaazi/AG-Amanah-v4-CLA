@@ -25,6 +25,13 @@ dist-ssr
 
 # Android build (separate git repo)
 android/
+android-child/.gradle/
+android-child/build/
+android-child/app/build/
+android-child/.idea/
+android-child/.kotlin/
+android-child/local.properties
+android-child/*.hprof
 
 # Environment variables (security)
 .env
@@ -36,3 +43,6 @@ phase_backups/
 *.zip
 *.7z
 *.bak
+
+# Windows reserved-name artifact
+nul

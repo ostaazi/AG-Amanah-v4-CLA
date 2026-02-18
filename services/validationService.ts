@@ -107,10 +107,27 @@ export const ValidationService = {
         if (!alert.type || !alert.severity) {
             return { valid: false, error: 'Missing required alert fields (type, severity)' };
         }
+        const validSeverities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+        if (!validSeverities.includes(alert.severity)) {
+            return { valid: false, error: `Invalid alert severity: ${alert.severity}` };
+        }
+        if (alert.confidence !== undefined && (typeof alert.confidence !== 'number' || alert.confidence < 0 || alert.confidence > 100)) {
+            return { valid: false, error: 'Alert confidence must be a number between 0 and 100' };
+        }
         if (alert.notes && !ValidationService.isSafeText(alert.notes)) {
             return { valid: false, error: 'Alert notes contain unsafe characters' };
         }
         return { valid: true };
+    },
+
+    /**
+     * Determines if an alert should trigger auto-lock actions.
+     * Only CRITICAL alerts with confidence >= 70 should auto-lock.
+     */
+    shouldAutoLock: (alert: { severity?: string; confidence?: number }): boolean => {
+        if (alert.severity !== 'CRITICAL') return false;
+        const confidence = alert.confidence ?? 0;
+        return confidence >= 70;
     },
 
     /**

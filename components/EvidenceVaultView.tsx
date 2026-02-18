@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { EvidenceRecord, AlertSeverity, ParentAccount, Category } from '../types';
 import { ICONS, AmanahLogo, AmanahGlobalDefs, AmanahShield } from '../constants';
 import Skeleton from './Skeleton';
-import { deleteAlertFromDB, updateAlertStatus } from '../services/firestoreService';
+import { deleteAlertFromDB, sendRemoteCommand, updateAlertStatus } from '../services/firestoreService';
 import { useStepUpGuard } from './auth/StepUpGuard';
 
 interface EvidenceVaultViewProps {
@@ -16,6 +16,12 @@ interface EvidenceVaultViewProps {
 }
 
 const VAULT_FILTERS_STORAGE_KEY = 'amanah_vault_filters_v1';
+
+const normalizeHandle = (value: string): string => {
+  const trimmed = String(value || '').trim().replace(/^@+/, '');
+  if (!trimmed) return 'unknown_user';
+  return trimmed.replace(/\s+/g, '_').toLowerCase();
+};
 
 const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
   records,
@@ -32,6 +38,8 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
   const [selectedRecord, setSelectedRecord] = useState<EvidenceRecord | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isRequestingScreenshot, setIsRequestingScreenshot] = useState(false);
+  const [screenshotRequestError, setScreenshotRequestError] = useState('');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -80,6 +88,11 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       onModalToggle(!!selectedRecord);
     }
   }, [selectedRecord, onModalToggle]);
+
+  useEffect(() => {
+    setIsRequestingScreenshot(false);
+    setScreenshotRequestError('');
+  }, [selectedRecord?.id]);
 
   const isPulseExecutionRecord = (record: EvidenceRecord) =>
     String((record as any).type || '')
@@ -253,16 +266,127 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
     if (selectedRecord.conversationLog && selectedRecord.conversationLog.length > 0) {
       return selectedRecord.conversationLog;
     }
+    const platform = String(selectedRecord.platform || '').toLowerCase();
+    const capturedText = String(selectedRecord.content || '').trim();
+    const analysisText = String(selectedRecord.aiAnalysis || '').trim();
+    const isOperationalLiveFrame =
+      platform === 'live stream' &&
+      capturedText.toLowerCase().includes('live screenshot frame');
+    const eventTime = new Date(selectedRecord.timestamp as any).toLocaleTimeString('ar-EG', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
     return [
       {
-        sender: String(selectedRecord.suspectUsername || 'مجهول'),
-        text: selectedRecord.content,
-        time: '10:07 AM',
-        isSuspect: true,
+        sender: isOperationalLiveFrame
+          ? 'AMANAH_SYSTEM'
+          : String(selectedRecord.suspectUsername || 'مجهول'),
+        text: capturedText || '[لا يوجد نص محادثة محفوظ، تم تسجيل المحتوى المرصود فقط]',
+        time: eventTime,
+        isSuspect: !isOperationalLiveFrame,
       },
-      { sender: 'الهدف', text: 'لا أعرفك!', time: '10:10 AM', isSuspect: false },
+      ...(analysisText
+        ? [
+            {
+              sender: 'AMANAH_AI',
+              text: analysisText,
+              time: eventTime,
+              isSuspect: false,
+            },
+          ]
+        : []),
     ];
   }, [selectedRecord]);
+
+  const selectedRecordTimestampLabel = useMemo(() => {
+    if (!selectedRecord) return '--';
+    const date = new Date(selectedRecord.timestamp as any);
+    if (Number.isNaN(date.getTime())) return '--';
+    return date.toLocaleString('ar-EG', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  }, [selectedRecord]);
+
+  const selectedRecordDetails = useMemo(() => {
+    if (!selectedRecord) {
+      return {
+        observedContent: '--',
+        detectionReason: '--',
+        sourceApp: '--',
+        sourceLocation: '--',
+        targetHandle: '@unknown_user',
+      };
+    }
+
+    const observedContent = String(selectedRecord.content || '').trim() || '--';
+    const detectionReason = String(selectedRecord.aiAnalysis || '').trim() || '--';
+    const sourceApp = String(selectedRecord.platform || '').trim() || '--';
+    const rawLocation =
+      (selectedRecord as any)?.location?.address ||
+      (selectedRecord as any)?.locationAddress ||
+      (selectedRecord as any)?.geoAddress ||
+      (selectedRecord as any)?.sourceLocation ||
+      '';
+    const sourceLocation = String(rawLocation || '').trim() || '--';
+    const targetHandle = `@${normalizeHandle(String(selectedRecord.childName || 'unknown_user'))}`;
+
+    return {
+      observedContent,
+      detectionReason,
+      sourceApp,
+      sourceLocation,
+      targetHandle,
+    };
+  }, [selectedRecord]);
+
+  const selectedRecordChildId = String((selectedRecord as any)?.childId || '').trim();
+
+  const handleRequestEvidenceScreenshot = async () => {
+    if (!selectedRecord || isRequestingScreenshot) return;
+    if (!selectedRecordChildId) {
+      setScreenshotRequestError(
+        lang === 'ar'
+          ? 'لا يمكن طلب لقطة شاشة لهذا السجل لأن معرف الطفل غير موجود في بيانات الإنذار.'
+          : 'Cannot request a screenshot for this record because child ID is missing.'
+      );
+      return;
+    }
+
+    setIsRequestingScreenshot(true);
+    setScreenshotRequestError('');
+    try {
+      await sendRemoteCommand(selectedRecordChildId, 'takeScreenshot', true);
+      onRequestToast({
+        id: `vault-screenshot-${Date.now()}`,
+        childName: selectedRecord.childName,
+        content:
+          lang === 'ar'
+            ? 'تم إرسال طلب لقطة شاشة جديدة إلى جهاز الطفل.'
+            : 'A new screenshot request was sent to the child device.',
+        aiAnalysis:
+          lang === 'ar'
+            ? 'انتظر بضع ثوانٍ حتى يظهر الدليل المرئي في هذا السجل.'
+            : 'Wait a few seconds for visual evidence to appear in this record.',
+        category: Category.SAFE,
+        severity: AlertSeverity.LOW,
+      });
+    } catch (error: any) {
+      setScreenshotRequestError(
+        lang === 'ar'
+          ? `فشل طلب لقطة الشاشة: ${String(error?.message || 'خطأ غير معروف')}`
+          : `Screenshot request failed: ${String(error?.message || 'Unknown error')}`
+      );
+    } finally {
+      setIsRequestingScreenshot(false);
+    }
+  };
 
   const handleExport = async () => {
     if (!selectedRecord) return;
@@ -637,7 +761,7 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
                         {selectedRecord.childName}
                       </p>
                       <span className="bg-indigo-50 text-indigo-400 px-3 py-1.5 rounded-lg text-[10px] font-black font-mono">
-                        @target_user
+                        {selectedRecordDetails.targetHandle}
                       </span>
                     </div>
                   </div>
@@ -681,8 +805,72 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
                     className="text-sm font-black text-slate-600 font-mono tracking-widest"
                     dir="ltr"
                   >
-                    01/01/2026 - 15:16 GMT+3
+                    {selectedRecordTimestampLabel}
                   </span>
+                </div>
+              </div>
+
+              <div className="px-12 mb-8">
+                <div className="rounded-[2rem] border border-slate-100 bg-slate-50 p-6 space-y-4">
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                      المحتوى الذي تم رصده
+                    </p>
+                    <p className="text-sm font-black text-slate-800 leading-relaxed">
+                      {selectedRecordDetails.observedContent}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                      سبب التصنيف غير اللائق
+                    </p>
+                    <p className="text-xs font-bold text-slate-700 leading-relaxed whitespace-pre-wrap">
+                      {selectedRecordDetails.detectionReason}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="rounded-xl bg-white border border-slate-100 px-4 py-3">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">المصدر</p>
+                      <p className="text-sm font-black text-slate-800">{selectedRecordDetails.sourceApp}</p>
+                    </div>
+                    <div className="rounded-xl bg-white border border-slate-100 px-4 py-3">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">المكان</p>
+                      <p className="text-sm font-black text-slate-800">{selectedRecordDetails.sourceLocation}</p>
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-white border border-slate-100 px-4 py-3">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                      لقطة الشاشة الدليلية
+                    </p>
+                    {selectedRecord.imageData ? (
+                      <img
+                        src={selectedRecord.imageData}
+                        alt="Evidence screenshot"
+                        className="w-full max-h-80 object-contain rounded-xl border border-slate-200 bg-slate-100"
+                      />
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-xs font-bold text-slate-500">
+                          لا توجد لقطة شاشة مرفقة لهذا السجل حتى الآن.
+                        </p>
+                        <button
+                          onClick={handleRequestEvidenceScreenshot}
+                          disabled={isRequestingScreenshot || !selectedRecordChildId}
+                          className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black disabled:opacity-50"
+                        >
+                          {isRequestingScreenshot ? 'جارٍ طلب اللقطة...' : 'طلب لقطة شاشة الآن'}
+                        </button>
+                        {!selectedRecordChildId && (
+                          <p className="text-[11px] font-bold text-amber-600">
+                            هذا سجل قديم بدون `childId`، يلزم إنذار جديد لالتقاط لقطة تلقائيًا.
+                          </p>
+                        )}
+                        {!!screenshotRequestError && (
+                          <p className="text-[11px] font-bold text-rose-600">{screenshotRequestError}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -702,7 +890,7 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
                         className="text-[10px] text-slate-300 font-black font-mono tracking-widest"
                         dir="ltr"
                       >
-                        20:22
+                        {String(msg.time || selectedRecordTimestampLabel)}
                       </span>
                     </div>
                     <p className="text-2xl font-black text-slate-800 leading-snug text-right dir-rtl">

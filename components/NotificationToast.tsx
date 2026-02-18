@@ -12,15 +12,18 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ alert, onClose })
   const navigate = useNavigate();
   const [visible, setVisible] = useState(false);
   const isSystemSuccess = alert.category === Category.SAFE;
+  const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setVisible(true);
-    // تم تعديل المهلة الزمنية إلى 2000 مللي ثانية (ثانيتين) لتختفي الإشعارات بسرعة
     const timer = setTimeout(() => {
       setVisible(false);
-      setTimeout(onClose, 500);
+      closeTimerRef.current = setTimeout(onClose, 500);
     }, 2000);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
   }, [alert, onClose]);
 
   const handleToastClick = () => {
@@ -28,7 +31,8 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ alert, onClose })
       navigate('/vault', { state: { openAlertId: alert.id } });
     }
     setVisible(false);
-    setTimeout(onClose, 500);
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(onClose, 500);
   };
 
   // التدرج الذهبي الرسمي لـ Amanah (8 درجات مصقولة)

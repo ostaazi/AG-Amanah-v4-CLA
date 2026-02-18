@@ -16,6 +16,8 @@ export interface DefenseAction {
 
 interface DefenseActionOptions {
   allowAutoLock?: boolean;
+  /** Alert confidence score (0-100). Lock commands are suppressed below 70. */
+  confidence?: number;
 }
 
 const isAutoLockCommand = (command: string): boolean =>
@@ -25,10 +27,15 @@ const filterDefenseActions = (
   actions: DefenseAction[],
   options: DefenseActionOptions
 ): DefenseAction[] => {
+  let filtered = actions;
   if (options.allowAutoLock === false) {
-    return actions.filter((action) => !isAutoLockCommand(action.command));
+    filtered = filtered.filter((action) => !isAutoLockCommand(action.command));
   }
-  return actions;
+  // Suppress lock commands when confidence is below threshold
+  if (options.confidence !== undefined && options.confidence < 70) {
+    filtered = filtered.filter((action) => !isAutoLockCommand(action.command));
+  }
+  return filtered;
 };
 
 const severityWeight = (severity: AlertSeverity): number => {

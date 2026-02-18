@@ -31,11 +31,18 @@ const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
       const savedBioId = localStorage.getItem('amanah_last_bio_id');
       if (!savedBioId) throw new Error('البصمة غير مسجلة لهذا الجهاز.');
       const success = await authenticateBiometrics(savedBioId);
-      if (success) {
-        onLoginSuccess({ uid: 'bio-user', email: 'parent@amanah.ai', name: 'الوالد' });
-      } else {
+      if (!success) {
         throw new Error('فشل التحقق من الهوية.');
       }
+      // Retrieve stored credentials and authenticate via Firebase
+      const storedUid = localStorage.getItem('amanah_bio_uid');
+      const storedEmail = localStorage.getItem('amanah_bio_email');
+      const storedName = localStorage.getItem('amanah_bio_name');
+      if (!storedUid || !storedEmail) {
+        // If no stored Firebase credentials, require manual login to re-link
+        throw new Error('يرجى تسجيل الدخول يدوياً لربط البصمة بحسابك.');
+      }
+      onLoginSuccess({ uid: storedUid, email: storedEmail, name: storedName || '' });
     } catch (err: any) {
       setError(err.message);
     } finally {

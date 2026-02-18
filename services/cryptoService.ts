@@ -4,7 +4,7 @@
  *
  * Security Model (Phase 1.2):
  * - Each user's data encrypted with a key derived from their password
- * - Uses PBKDF2-SHA256 with 100,000 iterations
+ * - Uses PBKDF2-SHA256 with 600,000 iterations (OWASP 2024 recommendation)
  * - Random salt per user (stored in Firestore)
  * - Application pepper from environment (defense-in-depth)
  * - AES-256-GCM for encryption (authenticated encryption)
@@ -18,8 +18,8 @@
 const ENCODING = new TextEncoder();
 const DECODING = new TextDecoder();
 
-// PBKDF2 Configuration
-const PBKDF2_ITERATIONS = 100000;
+// PBKDF2 Configuration (OWASP 2024: minimum 600,000 for SHA-256)
+const PBKDF2_ITERATIONS = 600000;
 const KEY_LENGTH_BITS = 256;
 const SALT_LENGTH_BYTES = 16;
 const IV_LENGTH_BYTES = 12; // GCM standard

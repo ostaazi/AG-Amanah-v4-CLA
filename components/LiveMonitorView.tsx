@@ -3,6 +3,7 @@ import { Child, MonitoringAlert } from '../types';
 import { ICONS } from '../constants';
 import { translations } from '../translations';
 import { sendRemoteCommand, subscribeToAlerts } from '../services/firestoreService';
+import { shouldBlockLockActivation } from '../services/lockCommandPolicy';
 
 type VideoSource = 'camera_front' | 'camera_back' | 'screen';
 type AudioSource = 'mic' | 'system';
@@ -153,17 +154,11 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
   useEffect(() => {
     if (!child) return;
     setSelectedChildId(child.id);
-    setIsLockdown(false);
+    setIsLockdown(!!child.deviceLocked);
     setIsBlackoutActive(false);
     setIsWalkieChannelEnabled(false);
     setIsPushToTalk(false);
-  }, [child?.id]);
-
-  useEffect(() => {
-    if (!allLocksDisabled) return;
-    setIsLockdown(false);
-    setIsBlackoutActive(false);
-  }, [allLocksDisabled]);
+  }, [child?.id, child?.deviceLocked]);
 
   useEffect(() => {
     if (!child || !child.parentId) return;
@@ -216,24 +211,37 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
     return () => unsub();
   }, [child]);
 
+  const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sirenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timers on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
+      if (sirenTimerRef.current) clearTimeout(sirenTimerRef.current);
+    };
+  }, []);
+
   const requestInstantScreenshot = async () => {
     if (!child) return;
     setIsCapturing(true);
     await sendRemoteCommand(child.id, 'takeScreenshot', true);
-    setTimeout(() => setIsCapturing(false), 15000);
+    if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
+    captureTimerRef.current = setTimeout(() => setIsCapturing(false), 15000);
   };
 
   const triggerSiren = async () => {
     if (!child) return;
     setIsSirenActive(true);
     await sendRemoteCommand(child.id, 'playSiren', true);
-    setTimeout(() => setIsSirenActive(false), 3000);
+    if (sirenTimerRef.current) clearTimeout(sirenTimerRef.current);
+    sirenTimerRef.current = setTimeout(() => setIsSirenActive(false), 3000);
   };
 
   const toggleEmergencyLock = async () => {
     if (!child) return;
-    if (allLocksDisabled) return;
     const next = !isLockdown;
+    if (shouldBlockLockActivation(allLocksDisabled, 'lockDevice', next)) return;
     setIsLockdown(next);
     if (next) {
       setIsBlackoutActive(true);
@@ -384,8 +392,8 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
 
   const toggleBlackoutScreen = async () => {
     if (!child) return;
-    if (allLocksDisabled) return;
     const next = !isBlackoutActive;
+    if (shouldBlockLockActivation(allLocksDisabled, 'lockscreenBlackout', { enabled: next })) return;
     setIsBlackoutActive(next);
     await sendRemoteCommand(child.id, 'lockscreenBlackout', {
       enabled: next,
@@ -404,6 +412,11 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
       sourceTag: 'live_monitor',
     });
   };
+
+  const canToggleEmergencyLock = !shouldBlockLockActivation(allLocksDisabled, 'lockDevice', !isLockdown);
+  const canToggleBlackoutScreen = !shouldBlockLockActivation(allLocksDisabled, 'lockscreenBlackout', {
+    enabled: !isBlackoutActive,
+  });
 
   if (!child) {
     return <div className="p-10 text-center font-black">لا يوجد أطفال مضافين حاليًا.</div>;
@@ -451,8 +464,9 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
 
           <div className="flex flex-wrap gap-3">
             <button
+              data-testid="live-lock-toggle"
               onClick={toggleEmergencyLock}
-              disabled={allLocksDisabled}
+              disabled={!canToggleEmergencyLock}
               className={`px-6 py-3 rounded-2xl font-black text-sm transition-all active:scale-95 ${isLockdown ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'}`}
             >
               {isLockdown ? 'إلغاء القفل' : 'قفل الجهاز الآن'}
@@ -471,8 +485,9 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
               {isStreaming ? t.endStream : t.startStream}
             </button>
             <button
+              data-testid="live-blackout-toggle"
               onClick={toggleBlackoutScreen}
-              disabled={allLocksDisabled}
+              disabled={!canToggleBlackoutScreen}
               className={`px-6 py-3 rounded-2xl font-black text-sm ${isBlackoutActive ? 'bg-violet-600 text-white' : 'bg-violet-50 text-violet-700'}`}
             >
               {lang === 'ar'

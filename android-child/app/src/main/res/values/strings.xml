@@ -1,0 +1,5 @@
+
+<resources>
+    <string name="app_name">Amanah Shield</string>
+    <string name="device_admin_description">هذه الصلاحية تسمح لـ Amanah بحماية جهاز طفلك من الحذف، وتفعيل القفل عن بعد في حالات الطوارئ الجنائية.</string>
+</resources>

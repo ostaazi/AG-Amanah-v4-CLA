@@ -1,0 +1,19 @@
+# Android build outputs and local caches
+.gradle/
+build/
+app/build/
+.idea/
+.kotlin/
+local.properties
+*.hprof
+
+# Generated/native build dirs
+.externalNativeBuild/
+.cxx/
+
+# APK/AAB artifacts
+*.apk
+*.aab
+*.ap_
+*.aar
+*.dex

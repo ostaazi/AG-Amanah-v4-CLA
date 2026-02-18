@@ -211,18 +211,32 @@ export interface ChatMessage {
 
 export interface MonitoringAlert {
   id: string;
+  childId?: string;
   childName: string;
   platform: string;
   content: string;
   imageData?: string;
+  captureStatus?: string;
+  sourceLocation?: string;
   category: Category;
   severity: AlertSeverity;
+  confidence?: number; // 0-100, alerts below 70 should not trigger auto-lock
   timestamp: Date;
   aiAnalysis: string;
   actionTaken?: string;
   latency?: string;
   suspectId?: string;
   status?: string;
+}
+
+export interface ParentMessage {
+  id: string;
+  familyId: string;
+  childId: string;
+  senderName: string;
+  senderId: string;
+  message: string;
+  timestamp: Date;
 }
 
 export interface EvidenceRecord extends MonitoringAlert {

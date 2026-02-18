@@ -41,8 +41,10 @@ import {
   EvidenceCustody,
   DeviceCommandAudit,
   SystemPatch,
+  ParentMessage,
 } from '../types';
 import { ValidationService } from './validationService';
+import { isLockCommand, isLockEnableRequest } from './lockCommandPolicy';
 
 export type ContactVerificationChannel = 'email' | 'phone';
 export type ContactVerificationDelivery =
@@ -78,6 +80,30 @@ const AUDIT_LOGS_COLLECTION = 'auditLogs';
 const SYSTEM_PATCHES_COLLECTION = 'systemPatches';
 const PAIRING_REQUESTS_SUBCOLLECTION = 'pairingRequests';
 const PAIRING_KEYS_COLLECTION = 'pairingKeys';
+const PARENT_MESSAGES_COLLECTION = 'parentMessages';
+
+/** Retry helper with exponential backoff for transient network failures */
+const retryWithBackoff = async <T>(
+  fn: () => Promise<T>,
+  maxRetries = 2,
+  baseDelayMs = 1000
+): Promise<T> => {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const code = String(error?.code || '');
+      const isRetryable =
+        code === 'auth/network-request-failed' ||
+        code === 'auth/too-many-requests' ||
+        code === 'auth/internal-error';
+      if (!isRetryable || attempt === maxRetries) throw error;
+      const delay = baseDelayMs * Math.pow(2, attempt);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error('Retry exhausted');
+};
 
 const isLocalInviteHost = (value: string): boolean => {
   const normalized = value.trim().toLowerCase();
@@ -140,19 +166,19 @@ const mapInviteEmailError = (error: any): string => {
   const code = String(error?.code || '');
   switch (code) {
     case 'auth/invalid-email':
-      return 'Invalid invitation email address.';
+      return 'عنوان البريد الإلكتروني غير صالح. | Invalid invitation email address.';
     case 'auth/operation-not-allowed':
-      return 'Required authentication provider is disabled in Firebase Auth.';
+      return 'مزود المصادقة المطلوب معطّل في Firebase. | Auth provider disabled in Firebase.';
     case 'auth/unauthorized-continue-uri':
-      return 'Invite URL is not authorized in Firebase Auth settings.';
+      return 'رابط الدعوة غير مُصرّح به في إعدادات Firebase. | Invite URL not authorized.';
     case 'auth/quota-exceeded':
-      return 'Firebase email quota exceeded. Please try later.';
+      return 'تم تجاوز حصة البريد. حاول لاحقاً. | Email quota exceeded.';
     case 'auth/too-many-requests':
-      return 'Too many invite attempts. Please try again later.';
+      return 'محاولات كثيرة جداً. حاول لاحقاً. | Too many attempts, try later.';
     case 'auth/network-request-failed':
-      return 'Network error while sending invitation email.';
+      return 'خطأ في الشبكة أثناء إرسال الدعوة. | Network error sending invitation.';
     default:
-      return error?.message || 'Failed to send invitation email.';
+      return error?.message || 'فشل إرسال الدعوة. | Failed to send invitation email.';
   }
 };
 
@@ -281,7 +307,7 @@ const sendCoParentInvitationEmail = async (
   };
 
   try {
-    await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+    await retryWithBackoff(() => sendSignInLinkToEmail(auth, email, actionCodeSettings));
     return 'EMAIL_LINK';
   } catch (error: any) {
     if (isEmailLinkDisabledError(error)) {
@@ -527,23 +553,23 @@ const sendPhoneVerificationCodeMessage = async (
         );
         // Keep providerErrors empty so flow can continue to DEV_FALLBACK.
       } else {
-      const message = String(error?.message || 'request failed');
-      const normalized = message.toLowerCase();
-      if (
-        webhook === 'http://localhost:8787/sms/verification' &&
-        (normalized.includes('failed to fetch') || normalized.includes('network'))
-      ) {
-        providerErrors.push('Webhook: local SMS webhook is unreachable. Start it with `npm run sms:webhook`.');
-      } else if (
-        normalized.includes('free sms are disabled for this country') ||
-        normalized.includes('textbelt rejected request')
-      ) {
-        providerErrors.push(
-          'Webhook: Textbelt free key is blocked for this country. Use a paid Textbelt key or switch webhook provider to `android_gateway`.'
-        );
-      } else {
-        providerErrors.push(`Webhook: ${message}`);
-      }
+        const message = String(error?.message || 'request failed');
+        const normalized = message.toLowerCase();
+        if (
+          webhook === 'http://localhost:8787/sms/verification' &&
+          (normalized.includes('failed to fetch') || normalized.includes('network'))
+        ) {
+          providerErrors.push('Webhook: local SMS webhook is unreachable. Start it with `npm run sms:webhook`.');
+        } else if (
+          normalized.includes('free sms are disabled for this country') ||
+          normalized.includes('textbelt rejected request')
+        ) {
+          providerErrors.push(
+            'Webhook: Textbelt free key is blocked for this country. Use a paid Textbelt key or switch webhook provider to `android_gateway`.'
+          );
+        } else {
+          providerErrors.push(`Webhook: ${message}`);
+        }
       }
     }
   }
@@ -764,6 +790,23 @@ const isPermissionDeniedError = (error: any): boolean => {
   return code === 'permission-denied' || message.includes('Missing or insufficient permissions');
 };
 
+const isMockTaggedData = (data: any): boolean =>
+  data?.mockTag === 'AMANAH_FAKE_DATA' || data?.isMock === true;
+
+const claimChildDeviceOwnership = async (childId: string, authUid: string): Promise<boolean> => {
+  if (!db || !childId || !authUid) return false;
+  const childRef = doc(db, CHILDREN_COLLECTION, childId);
+  try {
+    await updateDoc(childRef, { deviceOwnerUid: authUid });
+    return true;
+  } catch (error) {
+    if (!isPermissionDeniedError(error)) {
+      console.warn('Unexpected error while attempting child ownership claim:', error);
+    }
+    return false;
+  }
+};
+
 const resolvePlaybookOwnerId = (parentId: string): string | undefined => {
   const authUid = auth?.currentUser?.uid;
   if (!authUid) return undefined;
@@ -778,24 +821,6 @@ let lockBypassCache: {
   value: boolean;
   expiresAt: number;
 } | null = null;
-
-const isLockCommandName = (command: string): boolean =>
-  command === 'lockDevice' || command === 'lockscreenBlackout';
-
-const isLockEnableRequest = (command: string, value: any): boolean => {
-  if (command === 'lockDevice') {
-    return value === true;
-  }
-  if (command !== 'lockscreenBlackout') {
-    return false;
-  }
-  if (typeof value === 'boolean') return value;
-  if (value && typeof value === 'object') {
-    if (typeof value.enabled === 'boolean') return value.enabled;
-    if (value.value && typeof value.value.enabled === 'boolean') return value.value.enabled;
-  }
-  return !!value;
-};
 
 const buildLockBypassValue = (command: string, value: any): any => {
   if (command === 'lockDevice') return false;
@@ -853,16 +878,59 @@ const touchesGlobalLockBypassSettings = (updates: any): boolean =>
  * Phase 1.3: Added childId validation to prevent command injection
  */
 export const sendRemoteCommand = async (childId: string, command: string, value: any = true) => {
-  if (!db) return;
+  if (!db) {
+    throw new Error('Database not initialized');
+  }
+
+  // Phase 1.3: Verify authenticated user
+  const authUid = auth?.currentUser?.uid;
+  if (!authUid) {
+    throw new Error('Not authenticated. Please log in first.');
+  }
 
   // Validate childId to prevent path traversal and command injection
   validateDocumentId(childId, 'childId');
 
+  // Phase 1 Security: IDOR protection with legacy-safe ownership claim fallback.
+  // Some legacy child docs were linked without deviceOwnerUid and may block read before claim.
+  const childRef = doc(db, CHILDREN_COLLECTION, childId);
+  let ownershipVerified = false;
+  let childData: any = null;
+  try {
+    const childSnap = await getDoc(childRef);
+    if (!childSnap.exists()) {
+      throw new Error('Child device not found.');
+    }
+    childData = childSnap.data() as any;
+    const isOwner = childData.parentId === authUid || childData.deviceOwnerUid === authUid;
+    if (isOwner) {
+      ownershipVerified = true;
+    } else if (!childData.deviceOwnerUid) {
+      ownershipVerified = await claimChildDeviceOwnership(childId, authUid);
+    }
+  } catch (error: any) {
+    if (isPermissionDeniedError(error)) {
+      ownershipVerified = await claimChildDeviceOwnership(childId, authUid);
+    } else {
+      throw error;
+    }
+  }
+  if (!ownershipVerified) {
+    throw new Error('Access denied. You do not have permission to control this device.');
+  }
+
   let commandValue = value;
-  if (isLockCommandName(command) && isLockEnableRequest(command, commandValue)) {
-    const lockBypassEnabled = await resolveGlobalLockBypass();
-    if (lockBypassEnabled) {
+  if (isLockCommand(command) && isLockEnableRequest(command, commandValue)) {
+    // Per-child preventDeviceLock guard: if the child has this flag set,
+    // convert any lock-enable command to an unlock command instead.
+    if (childData?.preventDeviceLock === true) {
+      console.warn(`[Amanah] Lock command blocked for child ${childId}: preventDeviceLock is active.`);
       commandValue = buildLockBypassValue(command, commandValue);
+    } else {
+      const lockBypassEnabled = await resolveGlobalLockBypass();
+      if (lockBypassEnabled) {
+        commandValue = buildLockBypassValue(command, commandValue);
+      }
     }
   }
 
@@ -873,14 +941,57 @@ export const sendRemoteCommand = async (childId: string, command: string, value:
     throw new Error(validation.error);
   }
 
-  const childRef = doc(db, CHILDREN_COLLECTION, childId);
-  await updateDoc(childRef, {
+  const commandPatch = {
     [`commands.${command}`]: {
       value: commandValue,
       timestamp: Timestamp.now(),
       status: 'PENDING',
     },
-  });
+  };
+  const legacyCommandPatch = {
+    [`commands.${command}`]: {
+      value: commandValue,
+      timestamp: Timestamp.now(),
+    },
+  };
+
+  try {
+    await updateDoc(childRef, commandPatch);
+  } catch (error: any) {
+    if (!isPermissionDeniedError(error)) {
+      throw error;
+    }
+    const claimed = await claimChildDeviceOwnership(childId, authUid);
+    if (!claimed) {
+      // Last compatibility attempt for older rules that reject extra fields (like status).
+      await updateDoc(childRef, legacyCommandPatch);
+      return;
+    }
+    try {
+      await updateDoc(childRef, commandPatch);
+    } catch (retryError: any) {
+      if (!isPermissionDeniedError(retryError)) {
+        throw retryError;
+      }
+      await updateDoc(childRef, legacyCommandPatch);
+    }
+  }
+};
+
+/**
+ * Generate a cryptographically secure pairing key.
+ * Uses crypto.getRandomValues for unpredictable output.
+ * Format: 12-character alphanumeric (62^12 ≈ 3.2×10^21 combinations)
+ */
+const generateSecurePairingKey = (): string => {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const keyLength = 12;
+  const randomBytes = crypto.getRandomValues(new Uint8Array(keyLength));
+  let key = '';
+  for (let i = 0; i < keyLength; i++) {
+    key += alphabet[randomBytes[i] % alphabet.length];
+  }
+  return key;
 };
 
 export const rotatePairingKey = async (parentId: string): Promise<string> => {
@@ -891,24 +1002,35 @@ export const rotatePairingKey = async (parentId: string): Promise<string> => {
   }
   const ownerId = authUid;
 
-  // 1. Generate 6-digit random code
-  const newKey = Math.floor(100000 + Math.random() * 900000).toString();
+  // Rate limiting: prevent rapid key rotation (max 1 per 30 seconds)
+  const parentRef = doc(db, PARENTS_COLLECTION, ownerId);
+  const parentSnap = await getDoc(parentRef);
+  if (parentSnap.exists()) {
+    const data = parentSnap.data() as any;
+    const lastRotation = data.pairingKeyRotatedAt?.toMillis?.() || 0;
+    if (Date.now() - lastRotation < 30_000) {
+      throw new Error('يرجى الانتظار 30 ثانية قبل تجديد مفتاح الاقتران. | Please wait 30 seconds before rotating the pairing key.');
+    }
+  }
+
+  // Generate 12-char cryptographically secure key
+  const newKey = generateSecurePairingKey();
   const expiresAt = Timestamp.fromMillis(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-  // 2. Update parent profile (for reference)
-  const parentRef = doc(db, PARENTS_COLLECTION, ownerId);
+  // Update parent profile (for reference)
   await setDoc(parentRef, {
     pairingKey: newKey,
     pairingKeyExpiresAt: expiresAt,
+    pairingKeyRotatedAt: Timestamp.now(),
   }, { merge: true });
 
-  // 3. Create a look-up document where the KEY is the ID
-  // This avoids "PERMISSION_DENIED" on collection queries
+  // Create a look-up document where the KEY is the ID
   const keyRef = doc(db, PAIRING_KEYS_COLLECTION, newKey);
   await setDoc(keyRef, {
     parentId: ownerId,
     expiresAt,
-    createdAt: Timestamp.now()
+    createdAt: Timestamp.now(),
+    attempts: 0,
   });
 
   return newKey;
@@ -959,14 +1081,17 @@ export const subscribeToAlerts = (
   unsubscribe = onSnapshot(
     q,
     (snapshot) => {
-      const alerts = snapshot.docs.map((d) => {
-        const rawData = d.data();
-        return {
-          id: d.id,
-          ...sanitizeData(rawData),
-          timestamp: rawData.timestamp?.toDate() || new Date(),
-        } as MonitoringAlert;
-      });
+      const alerts = snapshot.docs
+        .map((d) => {
+          const rawData = d.data();
+          if (isMockTaggedData(rawData)) return null;
+          return {
+            id: d.id,
+            ...sanitizeData(rawData),
+            timestamp: rawData.timestamp?.toDate() || new Date(),
+          } as MonitoringAlert;
+        })
+        .filter(Boolean) as MonitoringAlert[];
       callback(alerts);
     },
     (err) => {
@@ -975,7 +1100,12 @@ export const subscribeToAlerts = (
       const simpleQ = query(collection(db, ALERTS_COLLECTION), where('parentId', '==', parentId));
       unsubscribe = onSnapshot(simpleQ, (snap) => {
         const fallbackAlerts = snap.docs
-          .map((d) => ({ id: d.id, ...sanitizeData(d.data()) }) as any)
+          .map((d) => {
+            const raw = d.data();
+            if (isMockTaggedData(raw)) return null;
+            return { id: d.id, ...sanitizeData(raw) } as any;
+          })
+          .filter(Boolean)
           .sort(
             (a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
           );
@@ -991,13 +1121,18 @@ export const subscribeToChildren = (parentId: string, callback: (children: Child
   if (!db || !parentId) return () => { };
   const q = query(collection(db, CHILDREN_COLLECTION), where('parentId', '==', parentId));
   return onSnapshot(q, (snapshot) => {
-    const children = snapshot.docs.map(
-      (d) =>
-        ({
-          id: d.id,
-          ...sanitizeData(d.data()),
-        }) as Child
-    );
+    const children = snapshot.docs
+      .map(
+        (d) => {
+          const raw = d.data();
+          if (isMockTaggedData(raw)) return null;
+          return {
+            id: d.id,
+            ...sanitizeData(raw),
+          } as Child;
+        }
+      )
+      .filter(Boolean) as Child[];
     callback(children);
   });
 };
@@ -1093,7 +1228,12 @@ export const fetchSupervisors = async (parentId: string): Promise<FamilyMember[]
 };
 
 export const updateMemberInDB = async (id: string, role: UserRole, updates: any): Promise<void> => {
-  if (!db) return;
+  if (!db) {
+    throw new Error('Database not initialized');
+  }
+  if (!id) {
+    throw new Error('Member id is required');
+  }
   const collectionName =
     role === 'CHILD'
       ? CHILDREN_COLLECTION
@@ -1101,7 +1241,21 @@ export const updateMemberInDB = async (id: string, role: UserRole, updates: any)
         ? SUPERVISORS_COLLECTION
         : PARENTS_COLLECTION;
   const ref = doc(db, collectionName, id);
-  await updateDoc(ref, updates);
+  try {
+    await updateDoc(ref, updates);
+  } catch (error: any) {
+    const authUid = auth?.currentUser?.uid;
+    const canRetryWithClaim =
+      collectionName === CHILDREN_COLLECTION && !!authUid && isPermissionDeniedError(error);
+    if (!canRetryWithClaim) {
+      throw error;
+    }
+    const claimed = await claimChildDeviceOwnership(id, authUid as string);
+    if (!claimed) {
+      throw error;
+    }
+    await updateDoc(ref, updates);
+  }
 
   // Ensure lock command guard picks up setting changes immediately.
   const authUid = auth?.currentUser?.uid;
@@ -1161,11 +1315,20 @@ export const inviteSupervisor = async (parentId: string, data: any): Promise<Fam
 
 export const deleteAlertFromDB = async (alertId: string): Promise<void> => {
   if (!db) return;
+  // Phase 1 Security: Validate alertId format
+  validateDocumentId(alertId, 'alertId');
   await deleteDoc(doc(db, ALERTS_COLLECTION, alertId));
 };
 
 export const updateAlertStatus = async (alertId: string, status: string): Promise<void> => {
   if (!db) return;
+  // Phase 1 Security: Validate alertId format
+  validateDocumentId(alertId, 'alertId');
+  // Whitelist allowed status values
+  const allowedStatuses = ['NEW', 'OPEN', 'REVIEWED', 'RESOLVED', 'DISMISSED'];
+  if (!allowedStatuses.includes(status)) {
+    throw new Error(`Invalid alert status: ${status}`);
+  }
   const alertRef = doc(db, ALERTS_COLLECTION, alertId);
   await updateDoc(alertRef, { status });
 };
@@ -1270,25 +1433,48 @@ export const rejectPairingRequest = async (parentId: string, requestId: string) 
  * Playbooks storage
  */
 export const savePlaybooks = async (parentId: string, playbooks: SafetyPlaybook[]): Promise<void> => {
-  if (!db) return;
+  if (!db) {
+    throw new Error('Database not initialized');
+  }
   const ownerId = resolvePlaybookOwnerId(parentId);
-  if (!ownerId) return;
+  if (!ownerId) {
+    throw new Error('Not authenticated');
+  }
 
   const ref = doc(db, PLAYBOOKS_COLLECTION, ownerId);
+  const sanitizedPlaybooks = ValidationService.sanitizeInput(playbooks);
   try {
     await setDoc(
       ref,
       {
         parentId: ownerId,
-        playbooks: ValidationService.sanitizeInput(playbooks),
+        playbooks: sanitizedPlaybooks,
         updatedAt: Timestamp.now(),
       },
       { merge: true }
     );
+    return;
   } catch (error: any) {
-    if (isPermissionDeniedError(error)) return;
-    console.warn('savePlaybooks failed, using graceful fallback:', error);
+    if (!isPermissionDeniedError(error)) {
+      throw error;
+    }
   }
+
+  // Fallback for projects that still use only /parents/{uid} write rules.
+  const parentRef = doc(db, PARENTS_COLLECTION, ownerId);
+  await setDoc(
+    parentRef,
+    {
+      safetyPlaybooks: sanitizedPlaybooks,
+      safetyPlaybooksUpdatedAt: Timestamp.now(),
+    },
+    { merge: true }
+  ).catch((error: any) => {
+    if (isPermissionDeniedError(error)) {
+      throw new Error('Permission denied while saving playbooks');
+    }
+    throw error;
+  });
 };
 
 export const fetchPlaybooks = async (parentId: string): Promise<SafetyPlaybook[]> => {
@@ -1299,11 +1485,30 @@ export const fetchPlaybooks = async (parentId: string): Promise<SafetyPlaybook[]
   const ref = doc(db, PLAYBOOKS_COLLECTION, ownerId);
   try {
     const snap = await getDoc(ref);
-    if (!snap.exists()) return [];
+    if (!snap.exists()) {
+      // Legacy fallback storage path inside parent document.
+      const parentSnap = await getDoc(doc(db, PARENTS_COLLECTION, ownerId));
+      if (!parentSnap.exists()) return [];
+      const parentData = sanitizeData(parentSnap.data());
+      return Array.isArray((parentData as any).safetyPlaybooks)
+        ? ((parentData as any).safetyPlaybooks as SafetyPlaybook[])
+        : [];
+    }
     const data = sanitizeData(snap.data());
     return Array.isArray((data as any).playbooks) ? ((data as any).playbooks as SafetyPlaybook[]) : [];
   } catch (error: any) {
-    if (isPermissionDeniedError(error)) return [];
+    if (isPermissionDeniedError(error)) {
+      try {
+        const parentSnap = await getDoc(doc(db, PARENTS_COLLECTION, ownerId));
+        if (!parentSnap.exists()) return [];
+        const parentData = sanitizeData(parentSnap.data());
+        return Array.isArray((parentData as any).safetyPlaybooks)
+          ? ((parentData as any).safetyPlaybooks as SafetyPlaybook[])
+          : [];
+      } catch {
+        return [];
+      }
+    }
     console.warn('fetchPlaybooks failed, using default playbooks fallback:', error);
     return [];
   }
@@ -1313,16 +1518,31 @@ export const subscribeToPlaybooks = (
   parentId: string,
   callback: (playbooks: SafetyPlaybook[]) => void
 ) => {
-  if (!db) return () => {};
+  if (!db) return () => { };
   const ownerId = resolvePlaybookOwnerId(parentId);
-  if (!ownerId) return () => {};
+  if (!ownerId) return () => { };
 
   const ref = doc(db, PLAYBOOKS_COLLECTION, ownerId);
-  return onSnapshot(
+  let unsubscribeFallback: (() => void) | null = null;
+  const unsubscribePrimary = onSnapshot(
     ref,
     (snap) => {
       if (!snap.exists()) {
-        callback([]);
+        // If canonical doc does not exist, try legacy parent-field fallback once.
+        void getDoc(doc(db, PARENTS_COLLECTION, ownerId))
+          .then((parentSnap) => {
+            if (!parentSnap.exists()) {
+              callback([]);
+              return;
+            }
+            const parentData = sanitizeData(parentSnap.data());
+            callback(
+              Array.isArray((parentData as any).safetyPlaybooks)
+                ? ((parentData as any).safetyPlaybooks as SafetyPlaybook[])
+                : []
+            );
+          })
+          .catch(() => callback([]));
         return;
       }
       const data = sanitizeData(snap.data());
@@ -1330,12 +1550,34 @@ export const subscribeToPlaybooks = (
     },
     (error) => {
       if (isPermissionDeniedError(error)) {
-        callback([]);
+        if (!unsubscribeFallback) {
+          const parentRef = doc(db, PARENTS_COLLECTION, ownerId);
+          unsubscribeFallback = onSnapshot(
+            parentRef,
+            (parentSnap) => {
+              if (!parentSnap.exists()) {
+                callback([]);
+                return;
+              }
+              const parentData = sanitizeData(parentSnap.data());
+              callback(
+                Array.isArray((parentData as any).safetyPlaybooks)
+                  ? ((parentData as any).safetyPlaybooks as SafetyPlaybook[])
+                  : []
+              );
+            },
+            () => callback([])
+          );
+        }
         return;
       }
       callback([]);
     }
   );
+  return () => {
+    unsubscribePrimary();
+    if (unsubscribeFallback) unsubscribeFallback();
+  };
 };
 
 /**
@@ -1388,7 +1630,7 @@ export const subscribeToAuditLogs = (
   parentId: string,
   callback: (logs: DeviceCommandAudit[]) => void
 ) => {
-  if (!db || !parentId) return () => {};
+  if (!db || !parentId) return () => { };
   const q = query(
     collection(db, AUDIT_LOGS_COLLECTION),
     where('parentId', '==', parentId),
@@ -1453,4 +1695,99 @@ export const fetchSystemPatches = async (parentId: string): Promise<SystemPatch[
       codeSnippet: row.codeSnippet || '',
     } satisfies SystemPatch;
   });
+};
+
+// ── SOS Emergency Alert ──────────────────────────────────────────────
+
+export const sendSOSAlert = async (
+  parentId: string,
+  childId: string,
+  childName: string,
+): Promise<string | null> => {
+  if (!db || !parentId || !childId) return null;
+  try {
+    const payload = {
+      parentId,
+      childId,
+      childName: sanitizeData({ n: childName }).n,
+      type: 'SOS',
+      severity: 'CRITICAL',
+      category: 'SOS',
+      content: `${childName} أرسل نداء طوارئ`,
+      aiAnalysis: 'SOS Emergency - Child initiated distress signal',
+      confidence: 100,
+      timestamp: Timestamp.now(),
+      status: 'OPEN',
+    };
+    const docRef = await addDoc(collection(db, ALERTS_COLLECTION), payload);
+    return docRef.id;
+  } catch (err) {
+    console.error('Failed to send SOS alert:', err);
+    return null;
+  }
+};
+
+// ── Parent Messages ──────────────────────────────────────────────────
+
+export const sendParentMessage = async (
+  familyId: string,
+  childId: string,
+  senderId: string,
+  senderName: string,
+  message: string,
+): Promise<string | null> => {
+  if (!db || !familyId || !childId || !message.trim()) return null;
+  try {
+    const payload = {
+      familyId,
+      childId,
+      senderId,
+      senderName: sanitizeData({ n: senderName }).n,
+      message: sanitizeData({ m: message.trim() }).m,
+      timestamp: Timestamp.now(),
+    };
+    const docRef = await addDoc(collection(db, PARENT_MESSAGES_COLLECTION), payload);
+    return docRef.id;
+  } catch (err) {
+    console.error('Failed to send parent message:', err);
+    return null;
+  }
+};
+
+export const subscribeToParentMessages = (
+  childId: string,
+  callback: (messages: ParentMessage[]) => void,
+) => {
+  if (!db || !childId) {
+    callback([]);
+    return () => { };
+  }
+  const q = query(
+    collection(db, PARENT_MESSAGES_COLLECTION),
+    where('childId', '==', childId),
+    orderBy('timestamp', 'desc'),
+    limit(5),
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const msgs: ParentMessage[] = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          familyId: data.familyId || '',
+          childId: data.childId || '',
+          senderId: data.senderId || '',
+          senderName: data.senderName || '',
+          message: data.message || '',
+          timestamp: data.timestamp?.toDate?.() || new Date(),
+        };
+      });
+      callback(msgs);
+    },
+    (err) => {
+      console.error('Parent messages subscription error:', err);
+      callback([]);
+    },
+  );
 };

@@ -18,6 +18,7 @@ const DeviceCommandControl: React.FC<DeviceCommandControlProps> = ({
 }) => {
   const [childId, setChildId] = useState(children[0]?.id || '');
   const [busy, setBusy] = useState(false);
+  const [commandError, setCommandError] = useState('');
   const [blackoutMessage, setBlackoutMessage] = useState(
     lang === 'ar'
       ? 'تم قفل الجهاز لدواعي الأمان. يرجى التواصل مع الوالدين.'
@@ -28,8 +29,37 @@ const DeviceCommandControl: React.FC<DeviceCommandControlProps> = ({
   const run = async (command: string, payload: any = true) => {
     if (!current) return;
     setBusy(true);
+    setCommandError('');
     try {
       await onSendCommand(current.id, command, payload);
+    } catch (error: any) {
+      setCommandError(
+        lang === 'ar'
+          ? `فشل إرسال الأمر: ${String(error?.message || 'خطأ غير معروف')}`
+          : `Command failed: ${String(error?.message || 'Unknown error')}`
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runUnlockFlow = async () => {
+    if (!current) return;
+    setBusy(true);
+    setCommandError('');
+    try {
+      await onSendCommand(current.id, 'lockDevice', false);
+      await onSendCommand(current.id, 'lockscreenBlackout', {
+        enabled: false,
+        message: '',
+        source: 'parent_ops_manual_unlock',
+      });
+    } catch (error: any) {
+      setCommandError(
+        lang === 'ar'
+          ? `فشل فك القفل: ${String(error?.message || 'خطأ غير معروف')}`
+          : `Unlock failed: ${String(error?.message || 'Unknown error')}`
+      );
     } finally {
       setBusy(false);
     }
@@ -55,6 +85,9 @@ const DeviceCommandControl: React.FC<DeviceCommandControlProps> = ({
       <div className="grid grid-cols-2 gap-2">
         <button onClick={() => run('lockDevice', true)} disabled={busy || allLocksDisabled} className="py-2 rounded-xl bg-slate-900 text-white text-sm font-black disabled:opacity-50">
           {lang === 'ar' ? 'قفل الجهاز' : 'Lock Device'}
+        </button>
+        <button onClick={runUnlockFlow} disabled={busy} className="py-2 rounded-xl bg-emerald-600 text-white text-sm font-black disabled:opacity-50">
+          {lang === 'ar' ? 'فك قفل الجهاز' : 'Unlock Device'}
         </button>
         <button onClick={() => run('takeScreenshot', true)} disabled={busy} className="py-2 rounded-xl bg-indigo-600 text-white text-sm font-black disabled:opacity-50">
           {lang === 'ar' ? 'لقطة شاشة' : 'Screenshot'}
@@ -84,6 +117,19 @@ const DeviceCommandControl: React.FC<DeviceCommandControlProps> = ({
         </button>
         <button
           onClick={() =>
+            run('lockscreenBlackout', {
+              enabled: false,
+              message: '',
+              source: 'parent_ops_manual_clear',
+            })
+          }
+          disabled={busy}
+          className="py-2 rounded-xl bg-slate-700 text-white text-sm font-black disabled:opacity-50"
+        >
+          {lang === 'ar' ? 'إيقاف شاشة الحجب' : 'Disable Blackout'}
+        </button>
+        <button
+          onClick={() =>
             run('walkieTalkieEnable', {
               enabled: true,
               source: 'mic',
@@ -102,6 +148,11 @@ const DeviceCommandControl: React.FC<DeviceCommandControlProps> = ({
         className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold"
         placeholder={lang === 'ar' ? 'رسالة شاشة الحجب...' : 'Blackout message...'}
       />
+      {!!commandError && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-black text-amber-700">
+          {commandError}
+        </div>
+      )}
       {allLocksDisabled && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-black text-rose-700">
           {lockDisableLabel ||

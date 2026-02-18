@@ -64,6 +64,7 @@ import {
   rotatePairingKey,
 } from './services/firestoreService';
 import { buildPulseExecutionEvidenceAlert } from './services/pulseExecutionEvidenceService';
+import { clearSelectedMockData, MOCK_DATA_DOMAINS } from './services/mockDataService';
 import { translations } from './translations';
 import { MY_DESIGNED_ASSETS, FALLBACK_ASSETS } from './assets';
 import { FEATURE_FLAGS } from './config/featureFlags';
@@ -318,6 +319,11 @@ const App: React.FC = () => {
   const allLocksDisabled = allLocksDisabledPermanently || allLocksDisabledTemporarily;
   const autoLockInAutomationEnabled = currentUser.enabledFeatures?.autoLockInAutomation !== false;
   const lockBypassUnlockedChildrenRef = useRef<Set<string>>(new Set());
+  const lockBypassPreviousPreventRef = useRef<Map<string, boolean>>(new Map());
+  const mockPurgeAttemptedRef = useRef<Set<string>>(new Set());
+  const autoEvidenceScreenshotRequestedRef = useRef<Set<string>>(new Set());
+  const childrenRef = useRef<Child[]>([]);
+  const latestAlertTopIdRef = useRef<string>('');
 
   useEffect(() => {
     const timer = window.setInterval(() => setLockNowTs(Date.now()), 30_000);
@@ -325,33 +331,86 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    childrenRef.current = children;
+  }, [children]);
+
+  useEffect(() => {
     if (!allLocksDisabled) {
+      const restoreEntries = Array.from(lockBypassPreviousPreventRef.current.entries());
+      if (restoreEntries.length > 0) {
+        setChildren((prev) =>
+          prev.map((child) => {
+            const previousPrevent = lockBypassPreviousPreventRef.current.get(child.id);
+            if (previousPrevent === undefined) return child;
+            return { ...child, preventDeviceLock: previousPrevent };
+          })
+        );
+        void Promise.allSettled(
+          restoreEntries.map(([childId, previousPrevent]) =>
+            updateMemberInDB(childId, 'CHILD', { preventDeviceLock: previousPrevent })
+          )
+        );
+      }
+      lockBypassPreviousPreventRef.current.clear();
       lockBypassUnlockedChildrenRef.current.clear();
       return;
     }
+
+    // Send unlock commands to ALL children (not just pending ones)
+    // This ensures persistent lock screens get cleared on every children update
+    const childrenToUnlock = children.filter((child) => child.deviceLocked);
     const pendingChildren = children.filter(
       (child) => !lockBypassUnlockedChildrenRef.current.has(child.id)
     );
-    if (pendingChildren.length === 0) return;
-    pendingChildren.forEach((child) => lockBypassUnlockedChildrenRef.current.add(child.id));
 
+    // Track new children for preventDeviceLock backup
+    pendingChildren.forEach((child) => {
+      lockBypassUnlockedChildrenRef.current.add(child.id);
+      if (!lockBypassPreviousPreventRef.current.has(child.id)) {
+        lockBypassPreviousPreventRef.current.set(child.id, child.preventDeviceLock ?? false);
+      }
+    });
+
+    // Always update local state for ALL children
     setChildren((prev) =>
-      prev.map((child) =>
-        pendingChildren.some((pending) => pending.id === child.id)
-          ? { ...child, deviceLocked: false }
-          : child
-      )
+      prev.map((child) => ({ ...child, deviceLocked: false, preventDeviceLock: true }))
     );
-    void Promise.allSettled(
-      pendingChildren.map(async (child) => {
+
+    // Determine which children need remote commands
+    // Send to: new children (pendingChildren) + any still showing as locked
+    const targetChildren = new Map<string, Child>();
+    pendingChildren.forEach((c) => targetChildren.set(c.id, c));
+    childrenToUnlock.forEach((c) => targetChildren.set(c.id, c));
+
+    if (targetChildren.size === 0) return;
+
+    // Send unlock commands with error handling and retry
+    const sendUnlockCommands = async (child: Child, attempt = 0): Promise<void> => {
+      try {
         await sendRemoteCommand(child.id, 'lockDevice', false);
         await sendRemoteCommand(child.id, 'lockscreenBlackout', {
           enabled: false,
           message: '',
           source: 'global_lock_bypass',
         });
-        await updateMemberInDB(child.id, 'CHILD', { deviceLocked: false });
-      })
+        await updateMemberInDB(child.id, 'CHILD', {
+          deviceLocked: false,
+          preventDeviceLock: true,
+        });
+      } catch (error) {
+        console.warn(`[Amanah] Unlock command failed for ${child.name || child.id} (attempt ${attempt + 1}):`, error);
+        // Retry once after 2 seconds
+        if (attempt < 1) {
+          await new Promise((r) => setTimeout(r, 2000));
+          return sendUnlockCommands(child, attempt + 1);
+        }
+        // On final failure, remove from tracking so it gets retried on next effect trigger
+        lockBypassUnlockedChildrenRef.current.delete(child.id);
+      }
+    };
+
+    void Promise.allSettled(
+      Array.from(targetChildren.values()).map((child) => sendUnlockCommands(child))
     );
   }, [allLocksDisabled, children]);
 
@@ -452,8 +511,8 @@ const App: React.FC = () => {
     const targetMode = modes.find((mode) => mode.id === modeId);
     const targetChild = children.find((child) => child.id === childId);
     if (!targetMode || !targetChild) return;
-    const shouldLockDevice = targetMode.isDeviceLocked && !allLocksDisabled;
-    const shouldBlackout = !!targetMode.blackoutOnApply && !allLocksDisabled;
+    const shouldLockDevice = targetMode.isDeviceLocked && !allLocksDisabled && !targetChild.preventDeviceLock;
+    const shouldBlackout = !!targetMode.blackoutOnApply && !allLocksDisabled && !targetChild.preventDeviceLock;
 
     const allowList = new Set(
       (targetMode.allowedApps || []).map((name) => name.toLowerCase().replace(/\s+/g, ' ').trim())
@@ -635,13 +694,36 @@ const App: React.FC = () => {
       if (id === currentUser.id) {
         setCurrentUser((prev) => applyNestedUpdates(prev, updates || {}));
       }
-      logUserActivity(currentUser.id, {
-        action: 'تحديث بيانات',
-        details: `تم تحديث إعدادات ${role} بنجاح`,
-        type: 'SUCCESS',
-      });
-    } catch (e) {
+      if (role === 'CHILD') {
+        setChildren((prev) =>
+          prev.map((child) => (child.id === id ? applyNestedUpdates(child, updates || {}) : child))
+        );
+      }
+      try {
+        await logUserActivity(currentUser.id, {
+          action: 'Update member',
+          details: `Updated ${role} settings successfully`,
+          type: 'SUCCESS',
+        });
+      } catch (logError) {
+        console.warn('Activity log failed after successful update:', logError);
+      }
+    } catch (e: any) {
       console.error(e);
+      setActiveToast({
+        id: `save-failed-${Date.now()}`,
+        childName: 'Amanah AI',
+        platform: 'Settings',
+        content: lang === 'ar' ? 'فشل حفظ التعديلات' : 'Failed to save changes',
+        category: Category.SAFE,
+        severity: AlertSeverity.MEDIUM,
+        timestamp: new Date(),
+        aiAnalysis:
+          lang === 'ar'
+            ? String(e?.message || 'تحقق من الصلاحيات واتصال Firebase.')
+            : String(e?.message || 'Check Firebase permissions and network connection.'),
+      });
+      throw e;
     }
   };
 
@@ -649,9 +731,11 @@ const App: React.FC = () => {
     childId: string,
     config: ProactiveDefenseConfig
   ) => {
+    setChildren((prev) =>
+      prev.map((child) => (child.id === childId ? { ...child, defenseConfig: config } : child))
+    );
     await handleUpdateMember(childId, 'CHILD', { defenseConfig: config });
   };
-
   const handleDeleteMember = async (id: string, role: UserRole) => {
     try {
       await deleteMemberFromDB(id, role);
@@ -755,39 +839,64 @@ const App: React.FC = () => {
   };
 
   const handleToggleDeviceLock = async (childId: string, shouldLock: boolean) => {
-    if (allLocksDisabled) {
+    // Force unlock: if shouldLock is false OR allLocksDisabled, always send unlock commands
+    if (allLocksDisabled || !shouldLock) {
       setChildren((prev) =>
         prev.map((child) => (child.id === childId ? { ...child, deviceLocked: false } : child))
       );
       await handleUpdateMember(childId, 'CHILD', { deviceLocked: false });
-      await sendRemoteCommand(childId, 'lockDevice', false);
-      await sendRemoteCommand(childId, 'lockscreenBlackout', {
-        enabled: false,
-        message: '',
-        source: 'global_lock_bypass',
-      });
-      setActiveToast({
-        id: `lock-bypass-${Date.now()}`,
-        childName: 'Amanah AI',
-        platform: 'Device Controls',
-        content:
-          lang === 'ar'
-            ? 'تم تعطيل جميع الأقفال من الإعدادات (مؤقت/دائم).'
-            : 'All lock commands are disabled by settings (temporary/permanent).',
-        category: Category.SAFE,
-        severity: AlertSeverity.LOW,
-        timestamp: new Date(),
-        aiAnalysis:
-          lang === 'ar'
-            ? 'تم تجاهل أمر القفل وتنفيذ فك القفل الوقائي.'
-            : 'Lock request was skipped and an unlock command was enforced.',
-      });
+      // Send both unlock commands to ensure lock screen is fully cleared
+      try {
+        await sendRemoteCommand(childId, 'lockDevice', false);
+      } catch (e) {
+        console.warn('[Amanah] lockDevice unlock failed, retrying...', e);
+        try { await sendRemoteCommand(childId, 'lockDevice', false); } catch { /* best effort */ }
+      }
+      try {
+        await sendRemoteCommand(childId, 'lockscreenBlackout', {
+          enabled: false,
+          message: '',
+          source: allLocksDisabled ? 'global_lock_bypass' : 'parent_manual_unlock',
+        });
+      } catch (e) {
+        console.warn('[Amanah] lockscreenBlackout unlock failed, retrying...', e);
+        try {
+          await sendRemoteCommand(childId, 'lockscreenBlackout', {
+            enabled: false,
+            message: '',
+            source: 'unlock_retry',
+          });
+        } catch { /* best effort */ }
+      }
+      if (allLocksDisabled) {
+        setActiveToast({
+          id: `lock-bypass-${Date.now()}`,
+          childName: 'Amanah AI',
+          platform: 'Device Controls',
+          content:
+            lang === 'ar'
+              ? 'تم تعطيل جميع الأقفال من الإعدادات (مؤقت/دائم).'
+              : 'All lock commands are disabled by settings (temporary/permanent).',
+          category: Category.SAFE,
+          severity: AlertSeverity.LOW,
+          timestamp: new Date(),
+          aiAnalysis:
+            lang === 'ar'
+              ? 'تم تجاهل أمر القفل وتنفيذ فك القفل الوقائي.'
+              : 'Lock request was skipped and an unlock command was enforced.',
+        });
+      }
       return;
     }
 
+    const childLockUpdates: Partial<Child> = { deviceLocked: shouldLock };
     if (shouldLock) {
-      await handleUpdateMember(childId, 'CHILD', { preventDeviceLock: false });
+      childLockUpdates.preventDeviceLock = false;
     }
+    setChildren((prev) =>
+      prev.map((child) => (child.id === childId ? { ...child, ...childLockUpdates } : child))
+    );
+    await handleUpdateMember(childId, 'CHILD', childLockUpdates);
     await sendRemoteCommand(childId, 'lockDevice', shouldLock);
     await sendRemoteCommand(childId, 'lockscreenBlackout', {
       enabled: shouldLock,
@@ -831,6 +940,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const ownerId = auth?.currentUser?.uid;
     if (!isAuthenticated || !ownerId) return;
+    latestAlertTopIdRef.current = '';
 
     backfillChildDeviceOwnership(ownerId).catch((e: any) => {
       const code = e?.code || '';
@@ -842,6 +952,19 @@ const App: React.FC = () => {
         console.error('Failed to backfill device ownership', e);
       }
     });
+
+    if (!mockPurgeAttemptedRef.current.has(ownerId)) {
+      mockPurgeAttemptedRef.current.add(ownerId);
+      clearSelectedMockData(ownerId, [...MOCK_DATA_DOMAINS]).catch((error: any) => {
+        const code = error?.code || '';
+        const message = String(error?.message || '');
+        const isPermissionIssue =
+          code === 'permission-denied' || message.includes('Missing or insufficient permissions');
+        if (!isPermissionIssue) {
+          console.warn('Mock data cleanup skipped due to unexpected error:', error);
+        }
+      });
+    }
 
     let childLoaded = false;
     let alertsLoaded = false;
@@ -858,19 +981,71 @@ const App: React.FC = () => {
       checkLoading();
     });
     const unsubAlerts = subscribeToAlerts(ownerId, (data) => {
-      if (data.length > alerts.length) {
-        const latest = data[0];
-        const protocol = currentUser.alertProtocol || 'FULL';
+      for (const alert of data) {
+        if (alert.imageData) {
+          autoEvidenceScreenshotRequestedRef.current.delete(alert.id);
+        }
+      }
 
-        // Logic: Respect User Notification Protocol
-        if (protocol !== 'NONE') {
-          if (latest.severity === AlertSeverity.CRITICAL && protocol === 'FULL') {
+      const latest = data[0];
+      const hasNewTopAlert = !!latest && latest.id !== latestAlertTopIdRef.current;
+
+      if (hasNewTopAlert && latest) {
+        const protocol = currentUser.alertProtocol || 'FULL';
+        const confidence = latest.confidence ?? 0;
+        const locksDisabledNow =
+          currentUser.enabledFeatures?.allLocksDisabledPermanently === true ||
+          Number(currentUser.enabledFeatures?.allLocksDisabledUntil || 0) > Date.now();
+        const platform = String(latest.platform || '').toLowerCase();
+        const contentText = String(latest.content || '').toLowerCase();
+        const analysisText = String(latest.aiAnalysis || '').toLowerCase();
+        const isOperationalLiveFrame =
+          platform === 'live stream' &&
+          (contentText.includes('live screenshot frame') || analysisText.includes('live stream frame'));
+
+        // Logic: Respect User Notification Protocol + confidence threshold
+        // When all locks are disabled, never show emergency overlay (which triggers device lock)
+        if (protocol !== 'NONE' && !isOperationalLiveFrame) {
+          if (
+            latest.severity === AlertSeverity.CRITICAL &&
+            protocol === 'FULL' &&
+            confidence >= 70 &&
+            !locksDisabledNow
+          ) {
             setEmergencyAlert(latest);
           } else {
             setActiveToast(latest);
           }
         }
+
+        const screenshotEligible =
+          !latest.imageData &&
+          (
+            latest.category === Category.ADULT_CONTENT ||
+            latest.category === Category.VIOLENCE ||
+            latest.category === Category.SEXUAL_EXPLOITATION ||
+            latest.category === Category.PREDATOR ||
+            latest.category === Category.BLACKMAIL
+          ) &&
+          (platform.includes('screen') || platform.includes('monitor') || platform.includes('ocr'));
+
+        if (screenshotEligible && !autoEvidenceScreenshotRequestedRef.current.has(latest.id)) {
+          autoEvidenceScreenshotRequestedRef.current.add(latest.id);
+          const targetChildId =
+            String(latest.childId || '').trim() ||
+            childrenRef.current.find((child) => child.name === latest.childName)?.id ||
+            '';
+          if (targetChildId) {
+            void sendRemoteCommand(targetChildId, 'takeScreenshot', true).catch((error) => {
+              autoEvidenceScreenshotRequestedRef.current.delete(latest.id);
+              console.warn('[Amanah] Auto evidence screenshot request failed:', error);
+            });
+          } else {
+            autoEvidenceScreenshotRequestedRef.current.delete(latest.id);
+          }
+        }
       }
+      latestAlertTopIdRef.current = latest?.id || '';
       setAlerts(data);
       alertsLoaded = true;
       checkLoading();
@@ -889,7 +1064,12 @@ const App: React.FC = () => {
       unsubPairing();
       clearTimeout(safetyTimer);
     };
-  }, [isAuthenticated, alerts.length, currentUser.alertProtocol]);
+  }, [
+    isAuthenticated,
+    currentUser.alertProtocol,
+    currentUser.enabledFeatures?.allLocksDisabledPermanently,
+    currentUser.enabledFeatures?.allLocksDisabledUntil,
+  ]);
 
   if (isAuthChecking)
     return (
@@ -1362,5 +1542,3 @@ const App: React.FC = () => {
 };
 
 export default App;
-
-

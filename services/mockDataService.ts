@@ -568,7 +568,6 @@ export const clearSelectedMockData = async (
   parentId: string,
   domains: MockDataDomain[]
 ): Promise<Record<MockDataDomain, number>> => {
-  ensureMockOpsAllowed('clear mock data');
   if (!db || !parentId) {
     return {
       children: 0,

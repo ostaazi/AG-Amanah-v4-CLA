@@ -10,7 +10,7 @@ import { fetchPlaybooks, savePlaybooks } from '../services/firestoreService';
 import DefenseRulesView from './parent/DefenseRulesView';
 import DefensePolicyView from './parent/DefensePolicyView';
 import GeoFenceManager from './parent/GeoFenceManager';
-import SafetyProtocolStudio from './SafetyProtocolStudio';
+import SafetyProtocolStudio, { SafetyProtocolDraft } from './SafetyProtocolStudio';
 import PlatformSOCView from './PlatformSOCView';
 
 interface SafetyPlaybookHubProps {
@@ -66,20 +66,71 @@ const defaultPlaybooks = (lang: 'ar' | 'en'): SafetyPlaybook[] => [
   },
 ];
 
+const buildActionsFromProtocolSteps = (steps: string[], seedId: string): AutomatedAction[] => {
+  const selected: AutomatedAction['type'][] = ['NOTIFY_PARENTS'];
+  const add = (type: AutomatedAction['type']) => {
+    if (!selected.includes(type)) selected.push(type);
+  };
+
+  for (const rawStep of steps) {
+    const step = String(rawStep || '').toLowerCase();
+    if (!step) continue;
+
+    if (step.includes('lock') || step.includes('قفل')) add('LOCK_DEVICE');
+    if (step.includes('blackout') || step.includes('حجب') || step.includes('شاشة')) {
+      add('LOCKSCREEN_BLACKOUT');
+    }
+    if (step.includes('screenshot') || step.includes('capture') || step.includes('لقطة')) {
+      add('SCREENSHOT_CAPTURE');
+    }
+    if (step.includes('camera') || step.includes('كاميرا') || step.includes('live')) {
+      add('LIVE_CAMERA_REQUEST');
+    }
+    if (step.includes('walkie') || step.includes('mic') || step.includes('مايك')) {
+      add('WALKIE_TALKIE_ENABLE');
+    }
+    if (step.includes('siren') || step.includes('صافرة')) add('SIREN');
+    if (step.includes('block app') || step.includes('حظر') || step.includes('منع')) {
+      add('BLOCK_APP');
+    }
+    if (step.includes('internet') || step.includes('network') || step.includes('شبكة')) {
+      add('QUARANTINE_NET');
+    }
+    if (step.includes('hardware') || step.includes('الكاميرا') || step.includes('المايك')) {
+      add('DISABLE_HARDWARE');
+    }
+  }
+
+  if (selected.length === 1) {
+    add('SCREENSHOT_CAPTURE');
+  }
+
+  return selected.map((type, index) => ({
+    id: `${seedId}-${index}`,
+    type,
+    isEnabled: true,
+  }));
+};
+
 const SafetyPlaybookHub: React.FC<SafetyPlaybookHubProps> = ({ currentUser, lang }) => {
   const [tab, setTab] = useState<HubTab>('playbooks');
   const [loading, setLoading] = useState(true);
   const [playbooks, setPlaybooks] = useState<SafetyPlaybook[]>([]);
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       setLoading(true);
+      setSaveError(null);
       try {
         const stored = await fetchPlaybooks(currentUser.id);
         if (!active) return;
         setPlaybooks(stored.length ? stored : defaultPlaybooks(lang));
+        setDirty(false);
       } catch (error) {
         if (!active) return;
         console.warn('Playbooks load skipped:', error);
@@ -89,12 +140,7 @@ const SafetyPlaybookHub: React.FC<SafetyPlaybookHubProps> = ({ currentUser, lang
       }
     };
 
-    load().catch((error) => {
-      if (!active) return;
-      console.warn('Playbooks load fatal fallback:', error);
-      setPlaybooks(defaultPlaybooks(lang));
-      setLoading(false);
-    });
+    void load();
 
     return () => {
       active = false;
@@ -107,6 +153,8 @@ const SafetyPlaybookHub: React.FC<SafetyPlaybookHubProps> = ({ currentUser, lang
         ? {
             title: 'مكتبة بروتوكولات الحماية',
             save: 'حفظ التغييرات',
+            unsaved: 'توجد تعديلات غير محفوظة.',
+            saveOk: 'تم حفظ البروتوكولات بنجاح.',
             tabs: {
               playbooks: 'البروتوكولات',
               rules: 'قواعد الدفاع',
@@ -125,6 +173,8 @@ const SafetyPlaybookHub: React.FC<SafetyPlaybookHubProps> = ({ currentUser, lang
         : {
             title: 'Safety Playbook Hub',
             save: 'Save Changes',
+            unsaved: 'You have unsaved protocol changes.',
+            saveOk: 'Playbooks saved successfully.',
             tabs: {
               playbooks: 'Playbooks',
               rules: 'Rules',
@@ -143,12 +193,20 @@ const SafetyPlaybookHub: React.FC<SafetyPlaybookHubProps> = ({ currentUser, lang
     [lang]
   );
 
+  const markChanged = () => {
+    setDirty(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+  };
+
   const togglePlaybook = (id: string) => {
     setPlaybooks((prev) => prev.map((pb) => (pb.id === id ? { ...pb, enabled: !pb.enabled } : pb)));
+    markChanged();
   };
 
   const updateSeverity = (id: string, minSeverity: AlertSeverity) => {
     setPlaybooks((prev) => prev.map((pb) => (pb.id === id ? { ...pb, minSeverity } : pb)));
+    markChanged();
   };
 
   const togglePlaybookAction = (playbookId: string, actionType: AutomatedAction['type']) => {
@@ -178,14 +236,38 @@ const SafetyPlaybookHub: React.FC<SafetyPlaybookHubProps> = ({ currentUser, lang
         };
       })
     );
+    markChanged();
+  };
+
+  const addProtocolFromStudio = async (draft: SafetyProtocolDraft) => {
+    const now = Date.now();
+    const id = `pb-custom-${now}`;
+    const nextPlaybook: SafetyPlaybook = {
+      id,
+      name: draft.title,
+      category: draft.category,
+      minSeverity: draft.severity,
+      enabled: true,
+      actions: buildActionsFromProtocolSteps(draft.steps, `a-${id}`),
+    };
+
+    setPlaybooks((prev) => [...prev, nextPlaybook]);
+    markChanged();
+    setTab('playbooks');
   };
 
   const persist = async () => {
     setSaving(true);
+    setSaveError(null);
+    setSaveSuccess(null);
     try {
       await savePlaybooks(currentUser.id, playbooks);
+      setDirty(false);
+      setSaveSuccess(t.saveOk);
     } catch (error) {
-      console.warn('Playbooks save skipped:', error);
+      const message = error instanceof Error ? error.message : String(error || 'Unknown error');
+      setSaveError(lang === 'ar' ? `فشل الحفظ: ${message}` : `Save failed: ${message}`);
+      console.warn('Playbooks save failed:', error);
     } finally {
       setSaving(false);
     }
@@ -203,6 +285,22 @@ const SafetyPlaybookHub: React.FC<SafetyPlaybookHubProps> = ({ currentUser, lang
           {saving ? '...' : t.save}
         </button>
       </div>
+
+      {dirty && !saveError && !saveSuccess && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-black text-amber-700">
+          {t.unsaved}
+        </div>
+      )}
+      {saveSuccess && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black text-emerald-700">
+          {saveSuccess}
+        </div>
+      )}
+      {saveError && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-black text-rose-700">
+          {saveError}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {(Object.keys(t.tabs) as HubTab[]).map((key) => (
@@ -289,9 +387,18 @@ const SafetyPlaybookHub: React.FC<SafetyPlaybookHubProps> = ({ currentUser, lang
           )}
 
           {tab === 'rules' && <DefenseRulesView lang={lang} playbooks={playbooks} />}
-          {tab === 'policy' && <DefensePolicyView lang={lang} />}
+          {tab === 'policy' && (
+            <DefensePolicyView
+              lang={lang}
+              playbooks={playbooks}
+              onTogglePolicy={togglePlaybook}
+              onUpdateSeverity={updateSeverity}
+            />
+          )}
           {tab === 'geo' && <GeoFenceManager lang={lang} />}
-          {tab === 'studio' && <SafetyProtocolStudio lang={lang} />}
+          {tab === 'studio' && (
+            <SafetyProtocolStudio lang={lang} onCreateProtocol={addProtocolFromStudio} saving={saving} />
+          )}
           {tab === 'soc' && <PlatformSOCView lang={lang} />}
         </>
       )}

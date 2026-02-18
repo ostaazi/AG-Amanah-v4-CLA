@@ -1,0 +1,108 @@
+{
+  "project": "Amanah-Protect",
+  "generated_on": "2026-02-17",
+  "purpose": "handoff context before starting a fresh working pass",
+  "conversation_summary": {
+    "primary_goal": "Enable parent phone verification flow reliably without requiring Firebase account upgrade constraints.",
+    "key_user_constraints": [
+      "Prefer secure Firebase flow when possible.",
+      "Need practical alternatives when billing/gateway is unavailable.",
+      "Need direct, precise, high-quality execution."
+    ],
+    "important_user_feedback": [
+      "User observed a decline in response quality and requested a cleaner restart flow.",
+      "User requested saving and reading context before continuing."
+    ]
+  },
+  "implemented_code_changes": [
+    {
+      "file": "services/firestoreService.ts",
+      "changes": [
+        "Added stronger Firebase phone auth error mapping.",
+        "Added fallback logic for SMS gateway and development fallback.",
+        "Added optional gateway-first behavior via VITE_PHONE_VERIFICATION_PREFER_GATEWAY.",
+        "Added localhost webhook default for local development.",
+        "Improved diagnostics for webhook/textbelt failures."
+      ]
+    },
+    {
+      "file": "server/sms-verification-webhook.mjs",
+      "changes": [
+        "Added sms webhook server for verification delivery.",
+        "Added provider support for textbelt, mock, and android_gateway."
+      ]
+    },
+    {
+      "file": "server/README.md",
+      "changes": [
+        "Documented sms webhook setup and provider options.",
+        "Documented gateway-first mode and local run flow."
+      ]
+    },
+    {
+      "file": "README.md",
+      "changes": [
+        "Updated SMS verification integration notes."
+      ]
+    },
+    {
+      "file": ".env.example",
+      "changes": [
+        "Added missing SMS and gateway configuration examples."
+      ]
+    },
+    {
+      "file": "package.json",
+      "changes": [
+        "Added script: sms:webhook."
+      ]
+    }
+  ],
+  "firebase_console_status": {
+    "billing_plan": "Blaze (confirmed by user screenshots)",
+    "api_key_restrictions": "Browser key configured to Application restrictions = None and API restrictions = Don't restrict key",
+    "authorized_domains": [
+      "localhost",
+      "127.0.0.1",
+      "amanah-protect.firebaseapp.com",
+      "amanah-protect.web.app"
+    ]
+  },
+  "current_blockers": [
+    {
+      "id": "local_dev_server_not_running",
+      "symptom": "http://localhost and http://127.0.0.1 do not open",
+      "verified_cause": "Vite fails to start with Error: spawn EPERM (esbuild process spawn failure)",
+      "evidence": [
+        "npm run dev -> failed to load config -> spawn EPERM",
+        "No LISTENING socket found on expected ports during checks"
+      ]
+    },
+    {
+      "id": "firebase_phone_auth_invalid_app_credential",
+      "symptom": "auth/invalid-app-credential during sendVerificationCode",
+      "likely_dependency": "Cannot finish reliable validation until local app runs and full Web app config/dns path is re-verified in a running flow"
+    }
+  ],
+  "environment_notes": {
+    "platform": "Windows",
+    "server_config": {
+      "vite_host": "0.0.0.0",
+      "vite_port": 3000
+    },
+    "observed_runtime": "Node v24.13.0 was seen in error output context"
+  },
+  "recommended_next_actions": [
+    "Fix local spawn EPERM first (without this, localhost/127.0.0.1 checks are invalid).",
+    "After dev server runs, retest Firebase phone verification from the same browser origin.",
+    "If invalid-app-credential persists, verify exact Web app config values loaded at runtime and match to Amanah-Web app."
+  ],
+  "working_mode_for_next_pass": {
+    "style": "strict execution-first, minimal assumptions, evidence-driven",
+    "rules": [
+      "Run command -> capture output -> decide next step.",
+      "No generic advice before local verification.",
+      "Small targeted edits with immediate verification."
+    ]
+  }
+}
