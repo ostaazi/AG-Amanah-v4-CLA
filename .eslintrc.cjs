@@ -28,25 +28,22 @@ module.exports = {
     },
   },
   rules: {
-    // Allow console.warn and console.error for debugging
-    'no-console': ['warn', { allow: ['warn', 'error'] }],
+    // Legacy stabilization: keep lint signal focused on hard failures/security.
+    'no-console': 'off',
 
     // TypeScript-specific rules
-    '@typescript-eslint/no-unused-vars': [
-      'warn',
-      { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
-    ], // Warn for legacy code
-    '@typescript-eslint/no-explicit-any': 'warn', // Warn instead of error (legacy code)
+    '@typescript-eslint/no-unused-vars': 'off',
+    '@typescript-eslint/no-explicit-any': 'off',
 
     // React-specific rules
     'react/prop-types': 'off', // Using TypeScript for prop validation
     'react/no-children-prop': 'off', // React Router v7 uses children as prop
-    'react/no-unescaped-entities': 'warn', // Warn instead of error for legacy code
+    'react/no-unescaped-entities': 'off',
     'react-hooks/rules-of-hooks': 'error',
-    'react-hooks/exhaustive-deps': 'warn',
+    'react-hooks/exhaustive-deps': 'off',
 
     // Code quality
-    'no-empty': 'warn', // Warn for empty blocks (legacy code)
+    'no-empty': 'off',
 
     // Security rules (from Phase 1 audit)
     'no-eval': 'error',

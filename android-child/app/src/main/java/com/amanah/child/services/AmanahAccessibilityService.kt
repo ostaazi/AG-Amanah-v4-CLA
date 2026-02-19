@@ -57,6 +57,21 @@ class AmanahAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             Log.w("AmanahService", "Failed to register lock-state receiver: ${e.message}")
         }
+        
+        // D2: Initialize Behavioral AI
+        com.amanah.child.utils.BehavioralAgent.init(this)
+        
+        // D3: Start Encrypted Threat Sync
+        com.amanah.child.utils.ThreatSyncManager.startSync(this)
+        
+        // Track Unlocks for Behavioral Baseline
+        val unlockFilter = IntentFilter(Intent.ACTION_USER_PRESENT)
+        registerReceiver(object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                com.amanah.child.utils.BehavioralAgent.onUnlock(context!!)
+            }
+        }, unlockFilter)
+
         syncLockOverlay()
     }
 
@@ -89,6 +104,18 @@ class AmanahAccessibilityService : AccessibilityService() {
         if (text.length < 3) return
 
         val currentTime = System.currentTimeMillis()
+        
+        // D2: Record Screen Time (approximate based on event intervals)
+        if (lastProcessTime > 0) {
+            val diff = currentTime - lastProcessTime
+            if (diff < 60000) { // Only count if active within last minute
+                val minutes = (diff / 60000.0).toInt().coerceAtLeast(1)
+                val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                val isLateNight = hour in 1..5
+                com.amanah.child.utils.BehavioralAgent.recordScreenTime(this, minutes, isLateNight)
+            }
+        }
+
         val isDuplicate = text == lastProcessedText && (currentTime - lastProcessTime) <= 10000
         if (isDuplicate) return
 

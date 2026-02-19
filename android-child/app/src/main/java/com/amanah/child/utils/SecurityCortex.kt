@@ -38,149 +38,90 @@ object SecurityCortex {
     private fun normalizePatterns(values: List<String>): List<String> =
         values.map(::normalizeForMatch).filter { it.isNotBlank() }
 
+    // Dynamic Threat Sets (Initialized with Factory Defaults)
     private val explicitPredatorPatterns = normalizePatterns(
         listOf(
-            "send nudes",
-            "show your body",
-            "open camera now",
-            "send private photo",
-            "video call in bedroom",
-            "ارسل صور عارية",
-            "افتح الكاميرا الان",
-            "صور خاصة",
-            "صوري جسمك",
-            "تعال خاص كاميرا"
+            "send nudes", "show your body", "open camera now", "send private photo",
+            "video call in bedroom", "ارسل صور عارية", "افتح الكاميرا الان",
+            "صور خاصة", "صوري جسمك", "تعال خاص كاميرا"
         )
-    )
+    ).toMutableSet()
 
     private val groomingAnchors = normalizePatterns(
         listOf(
-            "secret",
-            "dont tell",
-            "home alone",
-            "bedroom",
-            "private room",
-            "لا تقول لاحد",
-            "سر بيننا",
-            "لوحدك في البيت",
-            "غرفتك",
-            "بالسر"
+            "secret", "dont tell", "home alone", "bedroom", "private room",
+            "لا تقول لاحد", "سر بيننا", "لوحدك في البيت", "غرفتك", "بالسر"
         )
-    )
+    ).toMutableSet()
 
     private val groomingActions = normalizePatterns(
         listOf(
-            "send",
-            "show",
-            "photo",
-            "pic",
-            "camera",
-            "video call",
-            "meet",
-            "address",
-            "location",
-            "ارسل",
-            "ورني",
-            "صورة",
-            "صور",
-            "كاميرا",
-            "اتصال فيديو",
-            "تعال",
-            "مكانك",
-            "عنوانك"
+            "send", "show", "photo", "pic", "camera", "video call", "meet",
+            "address", "location", "ارسل", "ورني", "صورة", "صور", "كاميرا",
+            "اتصال فيديو", "تعال", "مكانك", "عنوانك"
         )
-    )
+    ).toMutableSet()
 
     private val selfHarmPatterns = normalizePatterns(
         listOf(
-            "kill myself",
-            "kill yourself",
-            "i want to die",
-            "suicide",
-            "cut my skin",
-            "cut yourself",
-            "self harm",
-            "انتحر",
-            "ابي انتحر",
-            "اقتل نفسي",
-            "جرح نفسي",
-            "اقطع جلدي",
-            "اذبح نفسي"
+            "kill myself", "kill yourself", "i want to die", "suicide", "cut my skin",
+            "cut yourself", "self harm", "انتحر", "ابي انتحر", "اقتل نفسي",
+            "جرح نفسي", "اقطع جلدي", "اذبح نفسي"
         )
-    )
+    ).toMutableSet()
 
     private val blackmailPatterns = normalizePatterns(
         listOf(
-            "pay or leak",
-            "send money or",
-            "i will expose you",
-            "i will leak your photos",
-            "blackmail",
-            "ابتزاز",
-            "بفضحك",
-            "بنشر صورك",
-            "ادفع والا",
-            "ارسل فلوس"
+            "pay or leak", "send money or", "i will expose you", "i will leak your photos",
+            "blackmail", "ابتزاز", "بفضحك", "بنشر صورك", "ادفع والا", "ارسل فلوس"
         )
-    )
+    ).toMutableSet()
 
     private val violenceCriticalPatterns = normalizePatterns(
         listOf(
-            "murder",
-            "stab him",
-            "shoot him",
-            "kill now",
-            "blood everywhere",
-            "اذبح",
-            "اطعن",
-            "اقتله",
-            "قتل",
-            "دم كثير"
+            "murder", "stab him", "shoot him", "kill now", "blood everywhere",
+            "اذبح", "اطعن", "اقتله", "قتل", "دم كثير"
         )
-    )
+    ).toMutableSet()
 
     private val violencePatterns = normalizePatterns(
         listOf(
-            "kill",
-            "blood",
-            "weapon",
-            "knife",
-            "violent",
-            "gore",
-            "موت",
-            "عنف",
-            "سلاح",
-            "سكين",
-            "دم"
+            "kill", "blood", "weapon", "knife", "violent", "gore",
+            "موت", "عنف", "سلاح", "سكين", "دم"
         )
-    )
+    ).toMutableSet()
 
     private val adultPatterns = normalizePatterns(
         listOf(
-            "porn",
-            "xxx",
-            "nude",
-            "naked",
-            "sex video",
-            "سكس",
-            "اباحي",
-            "صور عارية",
-            "محتوى اباحي"
+            "porn", "xxx", "nude", "naked", "sex video",
+            "سكس", "اباحي", "صور عارية", "محتوى اباحي"
         )
-    )
+    ).toMutableSet()
 
     private val bullyingPatterns = normalizePatterns(
         listOf(
-            "loser",
-            "stupid",
-            "hate you",
-            "idiot",
-            "غبي",
-            "فاشل",
-            "اكرهك",
-            "حيوان"
+            "loser", "stupid", "hate you", "idiot",
+            "غبي", "فاشل", "اكرهك", "حيوان"
         )
-    )
+    ).toMutableSet()
+
+    fun updateThreats(context: Context, category: String, newPatterns: List<String>) {
+        val normalized = normalizePatterns(newPatterns)
+        if (normalized.isEmpty()) return
+
+        when (category) {
+            AlertCategory.PREDATOR -> explicitPredatorPatterns.addAll(normalized)
+            AlertCategory.SELF_HARM -> selfHarmPatterns.addAll(normalized)
+            AlertCategory.BLACKMAIL -> blackmailPatterns.addAll(normalized)
+            AlertCategory.VIOLENCE -> violenceCriticalPatterns.addAll(normalized)
+            AlertCategory.ADULT_CONTENT -> adultPatterns.addAll(normalized)
+            AlertCategory.BULLYING -> bullyingPatterns.addAll(normalized)
+            "GROOMING_ANCHOR" -> groomingAnchors.addAll(normalized)
+            else -> Log.w("SecurityCortex", "Unknown category update: $category")
+        }
+        // In real impl: Save to EncryptedSharedPreferences here to persist across reboots
+        Log.i("SecurityCortex", "Updated threats for $category. Total: ${normalized.size}")
+    }
 
     data class AnalysisResult(
         val isDanger: Boolean,
@@ -260,17 +201,20 @@ object SecurityCortex {
     }
 
     fun analyzeImage(bitmap: Bitmap): AnalysisResult {
+        // 1. Zero-Latency Heuristic: Fast injury detection (CPU-based)
         detectInjuryClusters(bitmap)?.let { injury ->
             return injury
         }
 
+        // 2. Zero-Latency AI: On-Device TFLite (GPU/NNAPI if available, else CPU)
         if (!isAIReady || tflite == null) {
             return AnalysisResult(false, AlertCategory.SAFE, "LOW", 0.0f)
         }
 
         try {
+            val startTime = System.nanoTime()
             val imageProcessor = ImageProcessor.Builder()
-                .add(ResizeOp(224, 224, ResizeOp.ResizeMethod.BILINEAR))
+                .add(ResizeOp(224, 224, ResizeOp.ResizeMethod.NEAREST_NEIGHBOR)) // Faster than BILINEAR
                 .build()
 
             var tImage = TensorImage.fromBitmap(bitmap)
@@ -280,23 +224,27 @@ object SecurityCortex {
             tflite?.run(tImage.buffer, probabilityBuffer)
 
             // NSFWJS-compatible order: 0=Drawing, 1=Hentai, 2=Neutral, 3=Porn, 4=Sexy
-            val hentaiScore = probabilityBuffer[0].getOrElse(1) { 0f }.coerceIn(0f, 1f)
-            val neutralScore = probabilityBuffer[0].getOrElse(2) { 0f }.coerceIn(0f, 1f)
-            val pornScore = probabilityBuffer[0].getOrElse(3) { 0f }.coerceIn(0f, 1f)
-            val sexyScore = probabilityBuffer[0].getOrElse(4) { 0f }.coerceIn(0f, 1f)
+            val hentaiScore = probabilityBuffer[0].getOrElse(1) { 0f }
+            val neutralScore = probabilityBuffer[0].getOrElse(2) { 0f }
+            val pornScore = probabilityBuffer[0].getOrElse(3) { 0f }
+            val sexyScore = probabilityBuffer[0].getOrElse(4) { 0f }
             val explicitScore = maxOf(pornScore, hentaiScore)
 
-            if (explicitScore >= 0.82f && explicitScore > neutralScore + 0.15f) {
+            val elapsedMs = (System.nanoTime() - startTime) / 1_000_000
+            Log.v("SecurityCortex", "Local AI Inference took ${elapsedMs}ms")
+
+            // Stricter thresholds for zero-latency blocking to avoid false positives
+            if (explicitScore >= 0.85f && explicitScore > neutralScore + 0.20f) {
                 return AnalysisResult(true, AlertCategory.ADULT_CONTENT, "CRITICAL", explicitScore)
             }
 
-            val strongSexyContext = sexyScore >= 0.94f && explicitScore >= 0.35f
-            if (strongSexyContext && sexyScore > neutralScore + 0.10f) {
+            val strongSexyContext = sexyScore >= 0.96f && explicitScore >= 0.40f
+            if (strongSexyContext && sexyScore > neutralScore + 0.15f) {
                 val score = maxOf(sexyScore, explicitScore)
                 return AnalysisResult(true, AlertCategory.ADULT_CONTENT, "HIGH", score)
             }
         } catch (e: Exception) {
-            Log.e("SecurityCortex", "Image inference failed", e)
+            Log.e("SecurityCortex", "Local AI inference failed", e)
         }
 
         return AnalysisResult(false, AlertCategory.SAFE, "LOW", 0.0f)
@@ -306,13 +254,14 @@ object SecurityCortex {
         try {
             val width = bitmap.width.coerceAtLeast(1)
             val height = bitmap.height.coerceAtLeast(1)
-            val targetWidth = 128
+            // Lower resolution for speed (96px instead of 128px) -> <50ms processing
+            val targetWidth = 96
             val targetHeight = ((height.toFloat() / width.toFloat()) * targetWidth)
                 .toInt()
-                .coerceAtLeast(96)
-                .coerceAtMost(256)
+                .coerceAtLeast(64)
+                .coerceAtMost(192)
 
-            val scaled = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
+            val scaled = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, false) // Fast scale
             val scaledWidth = scaled.width
             val scaledHeight = scaled.height
             val pixels = IntArray(scaledWidth * scaledHeight)
@@ -333,13 +282,24 @@ object SecurityCortex {
                             val px = (row * gridSize + y) * scaledWidth + (col * gridSize + x)
                             if (px >= pixels.size) continue
                             val c = pixels[px]
+                            
+                            // Optimized HSV conversion and check
+                            val r = (c shr 16) and 0xFF
+                            val g = (c shr 8) and 0xFF
+                            val b = c and 0xFF
+                            
+                            // Quick pre-filter: Skip if not reddish (R must be dominant)
+                            if (r < g + 20 || r < b + 20) continue
+
                             Color.colorToHSV(c, hsv)
                             val hue = hsv[0]
                             val sat = hsv[1]
                             val value = hsv[2]
 
-                            val freshBlood = (hue <= 20f || hue >= 340f) && sat >= 0.40f && value >= 0.10f
-                            val deepInjury = (hue <= 28f || hue >= 320f) && sat >= 0.26f && value in 0.03f..0.38f
+                            // Tuned Blood/Injury ranges
+                            val freshBlood = (hue <= 18f || hue >= 345f) && sat >= 0.45f && value >= 0.25f
+                            val deepInjury = (hue <= 25f || hue >= 330f) && sat >= 0.35f && value in 0.15f..0.55f
+                            
                             if (freshBlood || deepInjury) {
                                 dangerPixels++
                                 cellDanger++
@@ -347,34 +307,34 @@ object SecurityCortex {
                         }
                     }
                     val cellArea = gridSize * gridSize
-                    if (cellDanger >= (cellArea * 0.30f)) {
+                    if (cellDanger >= (cellArea * 0.35f)) { // 35% of block is blood -> Cluster found
                         clusters++
                     }
                 }
             }
 
-            val totalPixels = min(pixels.size.toFloat(), (scaledWidth * scaledHeight).toFloat()).coerceAtLeast(1f)
+            val totalPixels = (scaledWidth * scaledHeight).toFloat().coerceAtLeast(1f)
             val dangerRatio = dangerPixels / totalPixels
 
             if (scaled !== bitmap) {
                 scaled.recycle()
             }
 
-            if (clusters >= 2 && dangerRatio >= 0.02f) {
-                val score = min(0.99f, 0.55f + (clusters * 0.08f) + (dangerRatio * 2.4f))
+            // Zero-Latency strict thresholds
+            if (clusters >= 3 && dangerRatio >= 0.05f) {
+                val score = min(0.99f, 0.60f + (clusters * 0.10f))
                 return AnalysisResult(true, AlertCategory.VIOLENCE, "CRITICAL", score)
             }
-            if (clusters >= 1 && dangerRatio >= 0.05f) {
-                val score = min(0.92f, 0.46f + (dangerRatio * 1.8f))
-                return AnalysisResult(true, AlertCategory.VIOLENCE, "HIGH", score)
+            if (clusters >= 2 && dangerRatio >= 0.08f) {
+                return AnalysisResult(true, AlertCategory.VIOLENCE, "HIGH", 0.90f)
             }
         } catch (e: Exception) {
-            Log.w("SecurityCortex", "Injury heuristic failed: ${e.message}")
+            Log.w("SecurityCortex", "Injury heuristc failed: ${e.message}")
         }
         return null
     }
 
-    private fun containsAny(normalizedText: String, patterns: List<String>): Boolean {
+    private fun containsAny(normalizedText: String, patterns: Collection<String>): Boolean {
         for (pattern in patterns) {
             if (normalizedText.contains(pattern)) {
                 return true

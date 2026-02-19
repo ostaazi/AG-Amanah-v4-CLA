@@ -46,3 +46,6 @@ phase_backups/
 
 # Windows reserved-name artifact
 nul
+
+# local eslint reports
+tmp_eslint_report.json

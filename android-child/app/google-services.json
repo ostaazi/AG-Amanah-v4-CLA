@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "51958897472",
+    "project_id": "amanah-protect",
+    "storage_bucket": "amanah-protect.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:51958897472:android:9d82a687186ab23af038a5",
+        "android_client_info": {
+          "package_name": "com.amanah.child"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAqfvSkv2JBrjCzm7YinxT3zfS1dm1mULE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
