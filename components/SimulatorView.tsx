@@ -3,6 +3,7 @@ import { localSentinelCheck } from '../services/securitySentinel';
 import { analyzeContent } from '../services/geminiService';
 import { loadVisualSentinelModel, scanImageLocally } from '../services/visualSentinel';
 import { saveAlertToDB } from '../services/firestoreService';
+import { formatTimeDefault } from '../services/dateTimeFormat';
 import { Child, MonitoringAlert, Category, AlertSeverity, EvidenceRecord } from '../types';
 import { ICONS } from '../constants';
 import { translations } from '../translations';
@@ -10,40 +11,40 @@ import { translations } from '../translations';
 const AR_SCENARIOS = [
   {
     id: 'blackmail',
-    label: 'ðŸ•µï¸â€â™‚ï¸ Ø§Ø¨ØªØ²Ø§Ø² Ù…Ø§Ù„ÙŠ',
+    label: 'Financial Blackmail',
     color: 'bg-slate-800 hover:bg-slate-900',
-    text: 'Ø§Ø³Ù…Ø¹ ÙŠØ§ Ø­Ù„ÙˆØŒ Ø¹Ù†Ø¯ÙŠ ØµÙˆØ±Ùƒ Ø§Ù„Ù„ÙŠ Ø£Ø±Ø³Ù„ØªÙ‡Ø§ Ø£Ù…Ø³. Ø¥Ø°Ø§ Ù…Ø§ Ø­ÙˆÙ„Øª Ù„ÙŠ Ø±ØµÙŠØ¯ Ø´Ø­Ù† Ø¨Ù€ 500 Ø±ÙŠØ§Ù„ Ø§Ù„Ø­ÙŠÙ†ØŒ Ø±Ø§Ø­ Ø£Ù†Ø´Ø±Ù‡Ø§ ÙÙŠ Ù‚Ø±ÙˆØ¨ Ø§Ù„Ù…Ø¯Ø±Ø³Ø© ÙˆØ£Ø±Ø³Ù„Ù‡Ø§ Ù„Ø£Ø¨ÙˆÙƒ. Ù…Ø¹Ø§Ùƒ Ø³Ø§Ø¹Ø© ÙˆØ­Ø¯Ø© Ø¨Ø³!',
+    text: "I have your private images. Send money now or I will share them publicly.",
   },
   {
     id: 'bullying',
-    label: 'ðŸ¤¬ ØªÙ†Ù…Ø± ÙˆØªÙˆÙƒØ³ÙŠÙƒ',
+    label: 'Bullying and Toxic Abuse',
     color: 'bg-slate-800 hover:bg-slate-900',
-    text: 'Ø£Ù†Øª Ø¥Ù†Ø³Ø§Ù† ÙØ§Ø´Ù„ ÙˆØ§Ù„ÙƒÙ„ ÙŠÙƒØ±Ù‡Ùƒ. Ù„ÙŠØ´ Ø¹Ø§ÙŠØ´ Ø£ØµÙ„Ø§Ù‹ØŸ Ù„Ùˆ Ù…Ù†Ùƒ Ø£Ù†ØªØ­Ø± ÙˆØ£Ø±ÙŠØ­ Ø§Ù„Ø¹Ø§Ù„Ù…. Ù„Ø§ ØªØ¬ÙŠ Ø§Ù„Ù…Ø¯Ø±Ø³Ø© Ø¨ÙƒØ±Ø© Ù„Ø£Ù†Ù†Ø§ Ø¨Ù†Ø¶Ø±Ø¨Ùƒ.',
+    text: 'You are worthless and everyone hates you. Hurt yourself and disappear.',
   },
   {
     id: 'grooming',
-    label: 'ðŸº Ø§Ø³ØªØ¯Ø±Ø§Ø¬',
+    label: 'Predator Grooming',
     color: 'bg-slate-800 hover:bg-slate-900',
-    text: 'Ù…Ù…ÙƒÙ† Ù†ÙØªØ­ ÙƒØ§Ù…ÙŠØ±Ø§ØŸ Ø£Ø¨ÙŠ Ø£Ø´ÙˆÙÙƒ. ØªØ¹Ø§Ù„ ØºØ±ÙØªÙƒ ÙˆÙ‚ÙÙ„ Ø§Ù„Ø¨Ø§Ø¨ Ø¹Ø´Ø§Ù† Ø£ÙˆØ±ÙŠÙƒ Ø§Ù„Ø³ÙƒÙ† Ø§Ù„Ø¬Ø¯ÙŠØ¯. Ù„Ø§ ØªØ¹Ù„Ù… Ø£Ø­Ø¯ØŒ Ù‡Ø°Ø§ Ø³Ø± Ø¨ÙŠÙ†Ù†Ø§.',
+    text: 'Open your camera, go alone, and keep this secret between us.',
   },
 ];
 
 const EN_SCENARIOS = [
   {
     id: 'blackmail',
-    label: 'ðŸ•µï¸â€â™‚ï¸ Financial Blackmail',
+    label: 'Financial Blackmail',
     color: 'bg-slate-800 hover:bg-slate-900',
     text: "Listen kid, I have the photos you sent yesterday. If you don't send me a $100 gift card right now, I will post them in the school group and send them to your dad. You have one hour!",
   },
   {
     id: 'bullying',
-    label: 'ðŸ¤¬ Bullying & Toxic',
+    label: 'Bullying and Toxic Abuse',
     color: 'bg-slate-800 hover:bg-slate-900',
     text: 'You are a loser and everyone hates you. Why are you even alive? Kill yourself and save the world.',
   },
   {
     id: 'grooming',
-    label: 'ðŸº Predator / Grooming',
+    label: 'Predator Grooming',
     color: 'bg-slate-800 hover:bg-slate-900',
     text: 'Can we open camera? I want to see you. Go to your room and lock the door so I can show you the new skin.',
   },
@@ -104,7 +105,7 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
     if ((!text.trim() && !displayImage) || loading) return;
     setEngineStatus('SCANNING');
     setLoading(true);
-    const child = children[0] || { name: 'Ø£Ø­Ù…Ø¯' };
+    const child = children[0] || { name: 'Child' };
     const startTime = performance.now();
 
     try {
@@ -127,8 +128,8 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
           localTextCheck.category,
           localTextCheck.severity,
           localTextCheck.latency,
-          `[Turbo Text V19] Ø±ØµØ¯ Ù…Ø­Ù„ÙŠ ÙÙˆØ±ÙŠ Ù„Ù„Ø¨ØµÙ…Ø© Ø§Ù„Ù†ØµÙŠØ©: ${localTextCheck.skeleton}`,
-          `Ù‚ÙÙ„ ÙÙˆØ±ÙŠ Ù„Ù„Ø¬Ù‡Ø§Ø² ÙˆØ¥Ø¨Ù„Ø§Øº Ø§Ù„Ù…Ø´Ø±Ù`
+          `[Turbo Text V19] Local text fingerprint trigger: ${localTextCheck.skeleton}`,
+          'Immediate safety lock and parent escalation'
         );
         setLoading(false);
         return;
@@ -139,12 +140,12 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
         if (visualCheck.isDanger) {
           await finalizeAlert(
             child,
-            text || '[ØµÙˆØ±Ø© Ù…Ø´Ø¨ÙˆÙ‡Ø©]',
+            text || '[suspicious image]',
             visualCheck.category,
             visualCheck.severity,
             visualCheck.latency,
-            `[Visual Sentinel] Ø±ØµØ¯ Ø¨ØµØ±ÙŠ Ù…Ø­Ù„ÙŠ (${visualCheck.label}) Ø¨Ù†Ø³Ø¨Ø© ${(visualCheck.probability * 100).toFixed(1)}%`,
-            `Ø­Ø¬Ø¨ Ø§Ù„ØµÙˆØ±Ø© Ù…Ø­Ù„ÙŠØ§Ù‹ ÙˆØ¹Ø²Ù„ Ø§Ù„Ø¬Ù‡Ø§Ø²`
+            `[Visual Sentinel] Local visual trigger (${visualCheck.label}) at ${(visualCheck.probability * 100).toFixed(1)}%`,
+            'Image blocked locally and device isolated'
           );
           setLoading(false);
           return;
@@ -168,8 +169,8 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
           aiResult.category as Category,
           aiResult.severity as AlertSeverity,
           cloudLatency,
-          aiResult.aiAnalysis || 'ØªÙ… Ø§Ù„Ø±ØµØ¯ Ø¹Ø¨Ø± ØªØ­Ù„ÙŠÙ„ Gemini Vision Ø§Ù„Ø¹Ù…ÙŠÙ‚.',
-          aiResult.actionTaken || 'ØªØ¯Ø®Ù„ ÙˆÙ‚Ø§Ø¦ÙŠ',
+          aiResult.aiAnalysis || 'Detected via deep Gemini Vision analysis.',
+          aiResult.actionTaken || 'Protective intervention applied.',
           aiResult.suspectUsername,
           aiResult.conversationLog
         );
@@ -202,9 +203,9 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
     );
 
     const alertData: any = {
-      childName: String(child?.name || 'Ø£Ø­Ù…Ø¯'),
+      childName: String(child?.name || 'Child'),
       platform: 'Instagram',
-      content: String(content || '[Ù…Ø­ØªÙˆÙ‰ ØµÙˆØ±Ø©]'),
+      content: String(content || '[image content]'),
       imageData: displayImage ? String(displayImage) : undefined,
       category: String(category) as Category,
       severity: String(severity) as AlertSeverity,
@@ -225,13 +226,13 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
               {
                 sender: suspectId,
                 text: String(content),
-                time: new Date().toLocaleTimeString(),
+                time: formatTimeDefault(new Date(), { includeSeconds: true }),
                 isSuspect: true,
               },
               {
                 sender: 'AMANAH_AI',
-                text: String(analysis || 'تم التقاط دليل المحتوى وتحليله تلقائيًا.'),
-                time: new Date().toLocaleTimeString(),
+                text: String(analysis || 'Content evidence captured and analyzed automatically.'),
+                time: formatTimeDefault(new Date(), { includeSeconds: true }),
                 isSuspect: false,
               },
             ],
@@ -243,7 +244,7 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
   return (
     <div
       className="max-w-xl mx-auto space-y-8 pb-40 animate-in fade-in"
-      dir={lang === 'ar' ? 'rtl' : 'ltr'}
+      dir="ltr"
     >
       {displayImage && (
         <img
@@ -266,12 +267,12 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
       >
         <div className="text-7xl mb-6 drop-shadow-lg relative z-10">
           {engineStatus === 'SCANNING'
-            ? 'ðŸ‘ï¸'
+            ? 'SCAN'
             : engineStatus === 'STRUCK'
-              ? 'âš¡'
+              ? 'ALERT'
               : engineStatus === 'SAFE'
-                ? 'âœ…'
-                : 'ðŸ›¡ï¸'}
+                ? 'SAFE'
+                : 'IDLE'}
         </div>
         <h2 className="text-4xl font-black tracking-tighter mb-2 relative z-10">
           Turbo Vision V2.1
@@ -308,8 +309,8 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
             />
           ) : (
             <div className="text-center">
-              <span className="text-4xl opacity-50 block">ðŸ–¼ï¸</span>
-              <p className="text-xs font-black text-slate-400">Ø§Ø±ÙØ¹ ØµÙˆØ±Ø© Ù…Ø´Ø¨ÙˆÙ‡Ø©</p>
+              <span className="text-4xl opacity-50 block">IMG</span>
+              <p className="text-xs font-black text-slate-400">Upload suspicious image</p>
             </div>
           )}
         </div>
@@ -318,7 +319,7 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
           rows={2}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Ù†Øµ Ø§Ù„Ø±Ø³Ø§Ù„Ø©..."
+          placeholder="Message text..."
           className="w-full p-6 rounded-[2rem] bg-slate-50 border-2 border-slate-100 outline-none font-bold text-right"
         />
 
@@ -339,7 +340,7 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
           disabled={loading || (!text.trim() && !displayImage)}
           className="w-full py-6 bg-indigo-600 text-white rounded-[2.5rem] font-black text-lg active:scale-95 shadow-xl"
         >
-          {loading ? 'Ø¬Ø§Ø±ÙŠ Ø§Ù„ØªØ­Ù„ÙŠÙ„...' : 'ØªØ´ØºÙŠÙ„ Ø§Ù„Ù…Ø­Ø§ÙƒØ§Ø© Ø§Ù„Ù‡Ø¬ÙŠÙ†Ø©'}
+          {loading ? 'Analyzing...' : 'Run Hybrid Simulation'}
         </button>
       </div>
     </div>
@@ -347,4 +348,5 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
 };
 
 export default SimulatorView;
+
 

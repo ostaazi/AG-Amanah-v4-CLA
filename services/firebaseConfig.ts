@@ -41,6 +41,8 @@ const useFirestoreEmulator =
   String(import.meta.env.VITE_USE_FIRESTORE_EMULATOR || '').toLowerCase() === 'true';
 const allowLiveMockMutations =
   String(import.meta.env.VITE_ALLOW_LIVE_MOCK_MUTATIONS || '').toLowerCase() === 'true';
+const autoPurgeMockDataOnAppLoad =
+  String(import.meta.env.VITE_AUTO_PURGE_MOCK_DATA || '').toLowerCase() === 'true';
 
 let app: any;
 let dbInstance: any = null;
@@ -68,7 +70,9 @@ try {
 export const db = dbInstance;
 export const auth = authInstance;
 export const isFirestoreEmulatorEnabled = () => useFirestoreEmulator;
-export const canUseMockData = () => useFirestoreEmulator || allowLiveMockMutations;
+export const canUseMockData = () =>
+  useFirestoreEmulator || allowLiveMockMutations;
+export const shouldAutoPurgeMockData = () => autoPurgeMockDataOnAppLoad;
 
 export const checkConnection = async () => {
   return dbInstance ? 'CONNECTED_SECURE' : 'DISCONNECTED';

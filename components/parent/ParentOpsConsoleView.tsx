@@ -25,6 +25,7 @@ import {
   EvidencePurgePlan,
   executeEvidencePurgePlan,
 } from '../../workers/evidencePurgeWorker';
+import { formatDateTimeDefault } from '../../services/dateTimeFormat';
 import { useStepUpGuard } from '../auth/StepUpGuard';
 import ParentSidebar from './ParentSidebar';
 import DeviceCommandsDashboard from './DeviceCommandsDashboard';
@@ -39,6 +40,7 @@ import ExportsTable from './ExportsTable';
 import HashVerifier from './HashVerifier';
 import CustodyTimeline from './CustodyTimeline';
 import ParentSafetyPlaybookHub from './SafetyPlaybookHub';
+import VulnerabilityCenterView from './VulnerabilityCenterView';
 
 interface ParentOpsConsoleViewProps {
   lang: 'ar' | 'en';
@@ -49,6 +51,7 @@ interface ParentOpsConsoleViewProps {
 
 type OpsTab =
   | 'commands'
+  | 'vulnerabilities'
   | 'incidents'
   | 'notifications'
   | 'evidence'
@@ -185,12 +188,12 @@ const ParentOpsConsoleView: React.FC<ParentOpsConsoleViewProps> = ({
       ? allLocksDisabledPermanently
         ? 'تعطيل دائم مفعل من الإعدادات.'
         : allLocksDisabledTemporarily
-          ? `تعطيل مؤقت مفعل حتى ${new Date(allLocksDisabledUntilTs).toLocaleString('ar-EG')}.`
+          ? `تعطيل مؤقت مفعل حتى ${formatDateTimeDefault(allLocksDisabledUntilTs, { includeSeconds: false })}.`
           : ''
       : allLocksDisabledPermanently
         ? 'Permanent lock disable is enabled from settings.'
         : allLocksDisabledTemporarily
-          ? `Temporary lock disable is active until ${new Date(allLocksDisabledUntilTs).toLocaleString('en-US')}.`
+          ? `Temporary lock disable is active until ${formatDateTimeDefault(allLocksDisabledUntilTs, { includeSeconds: false })}.`
           : '';
 
   const onSendCommand = async (childId: string, command: string, payload?: any) => {
@@ -406,6 +409,7 @@ const ParentOpsConsoleView: React.FC<ParentOpsConsoleViewProps> = ({
 
   const sidebarItems: Array<{ id: OpsTab; label: string }> = [
     { id: 'commands', label: lang === 'ar' ? 'الأوامر' : 'Commands' },
+    { id: 'vulnerabilities', label: lang === 'ar' ? 'الثغرات' : 'Vulnerabilities' },
     { id: 'incidents', label: lang === 'ar' ? 'الحوادث' : 'Incidents' },
     { id: 'notifications', label: lang === 'ar' ? 'الإشعارات' : 'Notifications' },
     { id: 'evidence', label: lang === 'ar' ? 'الأدلة' : 'Evidence' },
@@ -458,6 +462,16 @@ const ParentOpsConsoleView: React.FC<ParentOpsConsoleViewProps> = ({
               />
               <IncidentDetailsTabs lang={lang} incident={selectedIncident} />
             </>
+          )}
+
+          {tab === 'vulnerabilities' && (
+            <VulnerabilityCenterView
+              lang={lang}
+              parentId={currentUser.id}
+              children={children}
+              onSendCommand={onSendCommand}
+              onRequireStepUp={requireStepUp}
+            />
           )}
 
           {tab === 'notifications' && <NotificationCenterView lang={lang} alerts={alerts} />}
@@ -584,3 +598,4 @@ const ParentOpsConsoleView: React.FC<ParentOpsConsoleViewProps> = ({
 };
 
 export default ParentOpsConsoleView;
+

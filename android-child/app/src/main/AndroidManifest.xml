@@ -4,6 +4,12 @@
 
     <!-- صلاحيات أساسية -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
@@ -19,11 +25,13 @@
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="Amanah Shield"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
         android:theme="@style/Theme.AmanahChild">
 
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTask"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -60,6 +68,36 @@
             android:enabled="true"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
+
+        <service
+            android:name=".services.AppUsageTrackerService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <service
+            android:name=".services.TamperDetectionService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <service
+            android:name=".services.DeviceHealthReporterService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <service
+            android:name=".services.VulnerabilityScannerService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <service
+            android:name=".services.DnsFilterVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
 
         <receiver
             android:name=".receivers.AmanahAdminReceiver"

@@ -1,4 +1,5 @@
-﻿import { AlertSeverity, Category } from '../types';
+import { AlertSeverity, Category } from '../types';
+import { formatTimeDefault } from './dateTimeFormat';
 
 export type PulseTimelineStatus = 'done' | 'error' | 'skipped' | 'info';
 
@@ -171,11 +172,7 @@ export const buildPulseExecutionEvidenceAlert = (
     conversationLog: timelineForLog.map((entry) => ({
       sender: entry.status === 'error' ? 'Engine Error' : 'Amanah Engine',
       text: `${entry.title}: ${entry.detail}`,
-      time: normalizeDate(entry.at).toLocaleTimeString(lang === 'ar' ? 'ar-EG' : 'en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      }),
+      time: formatTimeDefault(normalizeDate(entry.at), { includeSeconds: true }),
       isSuspect: entry.status === 'error',
     })),
   };

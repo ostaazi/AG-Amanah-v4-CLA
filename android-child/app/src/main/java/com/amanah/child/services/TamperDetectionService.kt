@@ -14,7 +14,6 @@ import android.provider.Settings
 import android.util.Log
 import com.amanah.child.receivers.AmanahAdminReceiver
 import com.google.firebase.Timestamp
-import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +41,7 @@ class TamperDetectionService : Service() {
     companion object {
         private const val TAG = "TamperDetection"
         private const val CHECK_INTERVAL_MS = 30_000L // 30 seconds
+        private const val PREFS_NAME = "AmanahPrefs"
         private const val TAMPER_ALERTS_COLLECTION = "tamperAlerts"
     }
 
@@ -240,11 +240,16 @@ class TamperDetectionService : Service() {
     // ─── Alert Reporting ────────────────────────────────────────────────────
 
     private fun reportTamper(type: String, messageAr: String, messageEn: String) {
-        val childId = getSharedPreferences("amanah_prefs", MODE_PRIVATE)
-            .getString("child_id", null) ?: return
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val childId = prefs.getString("childDocumentId", null) ?: return
+        val parentId = prefs.getString("parentId", null) ?: return
+        val childName = prefs.getString("childName", Build.MODEL) ?: Build.MODEL
 
         val alertData = hashMapOf(
+            "parentId" to parentId,
             "childId" to childId,
+            "childName" to childName,
+            "platform" to "Tamper Detection",
             "type" to type,
             "messageAr" to messageAr,
             "messageEn" to messageEn,
@@ -266,7 +271,9 @@ class TamperDetectionService : Service() {
 
         // Also write to the child's main alerts collection
         val fullAlertData = hashMapOf(
+            "parentId" to parentId,
             "childId" to childId,
+            "childName" to childName,
             "platform" to "system",
             "content" to "$messageEn | $messageAr",
             "severity" to "CRITICAL",

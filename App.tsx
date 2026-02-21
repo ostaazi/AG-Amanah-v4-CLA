@@ -36,8 +36,10 @@ import AuthView from './components/AuthView';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import IncidentWarRoom from './components/IncidentWarRoom';
 import ChainOfCustodyView from './components/ChainOfCustodyView';
+import SystemHealthView from './components/SystemHealthView';
 import SystemSecurityReportView from './components/SystemSecurityReportView';
 import VisualBenchmarkView from './components/VisualBenchmarkView';
+import ComplianceDashboardView from './components/ComplianceDashboardView';
 import SafetyPlaybookHub from './components/SafetyPlaybookHub';
 import ParentOpsConsoleView from './components/parent/ParentOpsConsoleView';
 import CommandCenter from './components/CommandCenter';
@@ -45,7 +47,7 @@ import DeveloperResolutionHub from './components/DeveloperResolutionHub';
 
 import { ICONS, AmanahLogo, AdminShieldBadge, AmanahGlobalDefs, AmanahShield } from './constants';
 import { subscribeToAuthChanges, logoutUser } from './services/authService';
-import { auth } from './services/firebaseConfig';
+import { auth, canUseMockData, shouldAutoPurgeMockData } from './services/firebaseConfig';
 import {
   syncParentProfile,
   updateMemberInDB,
@@ -149,6 +151,8 @@ const Sidebar: React.FC<{
     </div>
   );
 };
+
+const AUTO_PURGE_DOMAINS = MOCK_DATA_DOMAINS.filter((domain) => domain !== 'operations');
 
 const PairingRequestModal: React.FC<{
   requests: PairingRequest[];
@@ -667,7 +671,9 @@ const App: React.FC = () => {
     }
     if (FEATURE_FLAGS.forensics) {
       items.push({ path: '/custody', label: t.custodyChain, icon: <ICONS.Chain /> });
+      items.push({ path: '/system-health', label: t.systemHealth, icon: <ICONS.Pulse /> });
       items.push({ path: '/security-report', label: t.securityReport, icon: <ICONS.ShieldCheck /> });
+      items.push({ path: '/compliance', label: t.complianceDashboard, icon: <ICONS.ShieldCheck /> });
       items.push({ path: '/benchmark', label: t.benchmark, icon: <ICONS.Rocket /> });
     }
     if (FEATURE_FLAGS.modes) items.push({ path: '/modes', label: t.modes, icon: <ICONS.Pulse /> });
@@ -953,9 +959,10 @@ const App: React.FC = () => {
       }
     });
 
-    if (!mockPurgeAttemptedRef.current.has(ownerId)) {
+    const allowAutoPurge = shouldAutoPurgeMockData() && canUseMockData();
+    if (allowAutoPurge && !mockPurgeAttemptedRef.current.has(ownerId)) {
       mockPurgeAttemptedRef.current.add(ownerId);
-      clearSelectedMockData(ownerId, [...MOCK_DATA_DOMAINS]).catch((error: any) => {
+      clearSelectedMockData(ownerId, [...AUTO_PURGE_DOMAINS]).catch((error: any) => {
         const code = error?.code || '';
         const message = String(error?.message || '');
         const isPermissionIssue =
@@ -1347,10 +1354,30 @@ const App: React.FC = () => {
               }
             />
             <Route
+              path="/system-health"
+              element={
+                FEATURE_FLAGS.forensics ? (
+                  <SystemHealthView parentId={currentUser.id} lang={lang} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
               path="/security-report"
               element={
                 FEATURE_FLAGS.forensics ? (
                   <SystemSecurityReportView parentId={currentUser.id} lang={lang} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/compliance"
+              element={
+                FEATURE_FLAGS.forensics ? (
+                  <ComplianceDashboardView parentId={currentUser.id} lang={lang} />
                 ) : (
                   <Navigate to="/" replace />
                 )
@@ -1392,7 +1419,7 @@ const App: React.FC = () => {
               element={
                 FEATURE_FLAGS.developerLab ? (
                   <ProtectedRoute userRole={currentUser.role} allowedRoles={['ADMIN']}>
-                    <DevLabView />
+                    <DevLabView lang={lang} currentUserId={currentUser.id} />
                   </ProtectedRoute>
                 ) : (
                   <Navigate to="/" replace />

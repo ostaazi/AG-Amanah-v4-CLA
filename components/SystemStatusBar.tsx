@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatTimeDefault } from '../services/dateTimeFormat';
 
 interface SystemStatusBarProps {
   hasCriticalAlert: boolean;
@@ -46,7 +47,7 @@ const SystemStatusBar: React.FC<SystemStatusBarProps> = ({ hasCriticalAlert, ale
 
       {/* Center: System Clock */}
       <div className="absolute left-1/2 -translate-x-1/2 font-mono opacity-80">
-        {time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
+        {formatTimeDefault(time, { includeSeconds: false })}
       </div>
 
       {/* Right side: Phone Status */}

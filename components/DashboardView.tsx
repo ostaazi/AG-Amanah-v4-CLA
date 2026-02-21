@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Child, MonitoringAlert, AlertSeverity, ActivityLog } from '../types';
 import { translations } from '../translations';
 import { subscribeToActivities } from '../services/firestoreService';
+import { formatTimeDefault } from '../services/dateTimeFormat';
 import Skeleton from './Skeleton';
 
 interface DashboardViewProps {
@@ -192,8 +193,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                       <p className="text-[8px] font-black text-slate-300 font-mono">
                         {alert.timestamp
                           ? typeof alert.timestamp === 'string'
-                            ? new Date(alert.timestamp).toLocaleTimeString()
-                            : (alert.timestamp as any).toLocaleTimeString()
+                            ? formatTimeDefault(alert.timestamp as any, { includeSeconds: true })
+                            : formatTimeDefault(alert.timestamp as any, { includeSeconds: true })
                           : 'الآن'}
                       </p>
                     </div>

@@ -1,0 +1,14 @@
+{
+  "generatedAt": "2026-02-20T12:00:00.000Z",
+  "referenceDevice": "SM-A705FN",
+  "buildVersion": "1.0.0-stable",
+  "runs": [
+    { "id": "safe-ui-001", "set": "safe-regression", "expected": { "critical": false }, "observed": { "critical": false, "latencyMs": 62 } },
+    { "id": "safe-chat-002", "set": "safe-regression", "expected": { "critical": false }, "observed": { "critical": false, "latencyMs": 73 } },
+    { "id": "safe-game-003", "set": "safe-regression", "expected": { "critical": false }, "observed": { "critical": false, "latencyMs": 79 } },
+    { "id": "critical-threat-101", "set": "critical-redteam", "expected": { "critical": true }, "observed": { "critical": true, "latencyMs": 68 } },
+    { "id": "critical-grooming-102", "set": "critical-redteam", "expected": { "critical": true }, "observed": { "critical": true, "latencyMs": 87 } },
+    { "id": "critical-selfharm-103", "set": "critical-redteam", "expected": { "critical": true }, "observed": { "critical": true, "latencyMs": 94 } }
+  ]
+}
+

@@ -1,9 +1,36 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Amanah Shield - adaptive icon foreground (safe zone: 66x66 centered in 108x108) -->
+    <!-- Shield body with maroon gradient -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M31,63.923C31,63.923 40.407,76.06 54,76.06C67.593,76.06 77,63.923 77,63.923L77,31.923C77,31.923 67.593,20 54,20C40.407,20 31,31.923 31,31.923L31,63.923Z" />
+        android:pathData="M54,16 C66.1,19.1 77.8,23.6 86.4,28.6 C87.3,29.5 88.2,30.4 88.2,32.2 L88.2,62.8 C88.2,85.3 73.4,101.5 54,109.6 C34.6,101.5 19.8,85.3 19.8,62.8 L19.8,32.2 C19.8,30.4 20.7,29.5 21.6,28.6 C30.2,23.6 41.9,19.1 54,16 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="54"
+                android:startY="16"
+                android:endX="54"
+                android:endY="109.6"
+                android:type="linear">
+                <item android:offset="0" android:color="#8A1538" />
+                <item android:offset="1" android:color="#5E0D25" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Gold border stroke -->
+    <path
+        android:strokeColor="#D1A23D"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M54,16 C66.1,19.1 77.8,23.6 86.4,28.6 C87.3,29.5 88.2,30.4 88.2,32.2 L88.2,62.8 C88.2,85.3 73.4,101.5 54,109.6 C34.6,101.5 19.8,85.3 19.8,62.8 L19.8,32.2 C19.8,30.4 20.7,29.5 21.6,28.6 C30.2,23.6 41.9,19.1 54,16 Z" />
+    <!-- Inner decorative cross lines -->
+    <path
+        android:strokeColor="#D1A23D"
+        android:strokeWidth="0.5"
+        android:alpha="0.3"
+        android:fillColor="#00000000"
+        android:pathData="M31.5,42 L76.5,42 M54,22 L54,97" />
 </vector>

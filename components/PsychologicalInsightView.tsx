@@ -21,6 +21,7 @@ import {
   ThreatExposureSubtype,
 } from '../services/psychDiagnosticService';
 import { fetchPlaybooks, sendRemoteCommand } from '../services/firestoreService';
+import { formatTimeDefault } from '../services/dateTimeFormat';
 import { getDefenseActionsWithPlaybooks } from '../services/ruleEngineService';
 
 interface PsychologicalInsightViewProps {
@@ -3650,11 +3651,7 @@ const PsychologicalInsightView: React.FC<PsychologicalInsightViewProps> = ({
                       {timelineStatusLabel(entry.status)}
                     </span>
                     <span className="text-[10px] font-bold text-slate-400">
-                      {entry.at.toLocaleTimeString(lang === 'ar' ? 'ar-EG' : 'en-US', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                      })}
+                      {formatTimeDefault(entry.at, { includeSeconds: true })}
                     </span>
                   </div>
                 </article>

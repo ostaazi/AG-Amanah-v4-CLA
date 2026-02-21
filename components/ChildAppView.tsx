@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AmanahShield } from '../constants';
 import { translations } from '../translations';
 import { sendSOSAlert, subscribeToParentMessages } from '../services/firestoreService';
+import { formatTimeDefault } from '../services/dateTimeFormat';
 import type { ParentMessage } from '../types';
 
 interface ChildAppViewProps {
@@ -96,13 +97,13 @@ const ChildAppView: React.FC<ChildAppViewProps> = ({
       }
 
       return dateValue
-        ? dateValue.toLocaleTimeString(isArabic ? 'ar-QA' : 'en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
+        ? formatTimeDefault(dateValue, {
+            includeSeconds: false,
+            fallback: '',
           })
         : '';
     },
-    [isArabic]
+    []
   );
 
   const pairingHint = useMemo(() => {

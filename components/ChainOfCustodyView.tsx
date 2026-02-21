@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { EvidenceCustody } from '../types';
 import { fetchCustodyByIncident } from '../services/firestoreService';
 import { verifyChainIntegrity } from '../services/forensicsService';
+import { formatDateTimeDefault } from '../services/dateTimeFormat';
 
 interface ChainOfCustodyViewProps {
   parentId: string;
@@ -78,7 +79,7 @@ const ChainOfCustodyView: React.FC<ChainOfCustodyViewProps> = ({ parentId, incid
               <div key={row.custody_id} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
                 <div className="flex items-center justify-between text-[11px] font-black text-slate-500">
                   <span>{row.event_key}</span>
-                  <span>{new Date(row.created_at).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US')}</span>
+                  <span>{formatDateTimeDefault(row.created_at, { includeSeconds: true })}</span>
                 </div>
                 <p className="text-sm font-black text-slate-800 mt-2">
                   {row.action} • {row.actor}

@@ -4,6 +4,7 @@ import { EvidenceRecord, AlertSeverity, ParentAccount, Category } from '../types
 import { ICONS, AmanahLogo, AmanahGlobalDefs, AmanahShield } from '../constants';
 import Skeleton from './Skeleton';
 import { deleteAlertFromDB, sendRemoteCommand, updateAlertStatus } from '../services/firestoreService';
+import { formatDateDefault, formatDateTimeDefault, formatTimeDefault } from '../services/dateTimeFormat';
 import { useStepUpGuard } from './auth/StepUpGuard';
 
 interface EvidenceVaultViewProps {
@@ -160,13 +161,7 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
     const latestDate = latestTimestamp ? new Date(latestTimestamp as any) : null;
     const latestSavedAt =
       latestDate && !Number.isNaN(latestDate.getTime())
-        ? latestDate.toLocaleString('ar-EG', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-          })
+        ? formatDateTimeDefault(latestDate, { includeSeconds: false })
         : '--';
 
     return {
@@ -199,7 +194,7 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       days.push({
         date,
         key,
-        label: new Intl.DateTimeFormat('ar-EG', { weekday: 'short' }).format(date),
+        label: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date),
         total: 0,
         pulse: 0,
         security: 0,
@@ -230,11 +225,7 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
     if (selectedDayKey === 'all') return null;
     const point = weeklyTrend.points.find((d) => d.key === selectedDayKey);
     if (!point) return selectedDayKey;
-    return point.date.toLocaleDateString('ar-EG', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
+    return formatDateDefault(point.date);
   }, [selectedDayKey, weeklyTrend.points]);
 
   useEffect(() => {
@@ -272,10 +263,8 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
     const isOperationalLiveFrame =
       platform === 'live stream' &&
       capturedText.toLowerCase().includes('live screenshot frame');
-    const eventTime = new Date(selectedRecord.timestamp as any).toLocaleTimeString('ar-EG', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
+    const eventTime = formatTimeDefault(selectedRecord.timestamp as any, {
+      includeSeconds: true,
     });
     return [
       {
@@ -303,15 +292,7 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
     if (!selectedRecord) return '--';
     const date = new Date(selectedRecord.timestamp as any);
     if (Number.isNaN(date.getTime())) return '--';
-    return date.toLocaleString('ar-EG', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
+    return formatDateTimeDefault(date, { includeSeconds: true });
   }, [selectedRecord]);
 
   const selectedRecordDetails = useMemo(() => {
@@ -322,6 +303,8 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
         sourceApp: '--',
         sourceLocation: '--',
         targetHandle: '@unknown_user',
+        deliveryStatus: '--',
+        bundleStatus: '--',
       };
     }
 
@@ -336,6 +319,36 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       '';
     const sourceLocation = String(rawLocation || '').trim() || '--';
     const targetHandle = `@${normalizeHandle(String(selectedRecord.childName || 'unknown_user'))}`;
+    const uploadStatus = String((selectedRecord as any)?.evidenceUploadStatus || '').trim();
+    const uploadAttempt = Number((selectedRecord as any)?.evidenceUploadAttempt || 0);
+    const uploadError = String((selectedRecord as any)?.evidenceUploadLastError || '')
+      .trim()
+      .slice(0, 180);
+    const uploadAckAtRaw = (selectedRecord as any)?.evidenceUploadAckAt;
+    const uploadAckAt = (() => {
+      if (!uploadAckAtRaw) return '';
+      const parsed = new Date(uploadAckAtRaw as any);
+      if (Number.isNaN(parsed.getTime())) return '';
+      return formatDateTimeDefault(parsed, { includeSeconds: true });
+    })();
+    const captureStatus = String((selectedRecord as any)?.captureStatus || '').trim();
+    const evidenceCompletenessRaw = Number((selectedRecord as any)?.evidenceCompleteness);
+    const evidenceCompleteness = Number.isFinite(evidenceCompletenessRaw)
+      ? Math.max(0, Math.min(1, evidenceCompletenessRaw))
+      : null;
+    const evidenceMissingFields = Array.isArray((selectedRecord as any)?.evidenceMissingFields)
+      ? ((selectedRecord as any).evidenceMissingFields as any[])
+        .map((field) => String(field || '').trim())
+        .filter(Boolean)
+      : [];
+    const deliveryStatus = uploadStatus
+      ? `${uploadStatus}${uploadAttempt > 0 ? ` | attempt=${uploadAttempt}` : ''}${uploadAckAt ? ` | ack=${uploadAckAt}` : ''}${uploadError ? ` | error=${uploadError}` : ''}`
+      : captureStatus
+        ? `CAPTURE:${captureStatus}`
+        : '--';
+    const bundleStatus = evidenceCompleteness !== null
+      ? `${Math.round(evidenceCompleteness * 100)}%${evidenceMissingFields.length > 0 ? ` | missing=${evidenceMissingFields.join(', ')}` : ''}`
+      : '--';
 
     return {
       observedContent,
@@ -343,6 +356,8 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       sourceApp,
       sourceLocation,
       targetHandle,
+      deliveryStatus,
+      bundleStatus,
     };
   }, [selectedRecord]);
 
@@ -839,6 +854,22 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
                     </div>
                   </div>
                   <div className="rounded-xl bg-white border border-slate-100 px-4 py-3">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                      حالة تسليم الدليل
+                    </p>
+                    <p className="text-xs font-bold text-slate-700 leading-relaxed break-words">
+                      {selectedRecordDetails.deliveryStatus}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-white border border-slate-100 px-4 py-3">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                      اكتمال حزمة الدليل
+                    </p>
+                    <p className="text-xs font-bold text-slate-700 leading-relaxed break-words">
+                      {selectedRecordDetails.bundleStatus}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-white border border-slate-100 px-4 py-3">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                       لقطة الشاشة الدليلية
                     </p>
@@ -997,6 +1028,7 @@ const InlineDangerConfirm: React.FC<{
     </div>
   </div>
 );
+
 
 
 

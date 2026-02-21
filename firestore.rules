@@ -22,6 +22,58 @@ service cloud.firestore {
         && resource.data.parentId == request.auth.uid;
     }
 
+    function canAccessChild(childId) {
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/children/$(childId))
+        && (
+          get(/databases/$(database)/documents/children/$(childId)).data.parentId == request.auth.uid
+          || get(/databases/$(database)/documents/children/$(childId)).data.get('deviceOwnerUid', null) == request.auth.uid
+        );
+    }
+
+    function childParentId(childId) {
+      return get(/databases/$(database)/documents/children/$(childId)).data.parentId;
+    }
+
+    function requestAlertHasOwnedChild() {
+      return request.resource.data.childId is string
+        && canAccessChild(request.resource.data.childId)
+        && request.resource.data.parentId is string
+        && request.resource.data.parentId == childParentId(request.resource.data.childId);
+    }
+
+    function resourceAlertHasOwnedChild() {
+      return resource.data.childId is string
+        && canAccessChild(resource.data.childId)
+        && resource.data.parentId is string
+        && resource.data.parentId == childParentId(resource.data.childId);
+    }
+
+    function canCreateRootAlert() {
+      return isAuthenticated()
+        && request.resource.data.parentId is string
+        && (
+          request.resource.data.parentId == request.auth.uid
+          || requestAlertHasOwnedChild()
+        );
+    }
+
+    function canPatchAlertUploadStateFromChild() {
+      return isAuthenticated()
+        && resourceAlertHasOwnedChild()
+        && request.resource.data.parentId == resource.data.parentId
+        && request.resource.data.childId == resource.data.childId
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'evidenceUploadStatus',
+          'evidenceUploadAttempt',
+          'evidenceUploadRetryCount',
+          'evidenceUploadLastError',
+          'evidenceUploadSource',
+          'evidenceUploadLastAttemptAt',
+          'evidenceUploadAckAt'
+        ]);
+    }
+
     match /parents/{parentId} {
       allow read, write: if isOwner(parentId);
 
@@ -57,6 +109,10 @@ service cloud.firestore {
         resource.data.parentId == request.auth.uid
         || resource.data.get('deviceOwnerUid', null) == request.auth.uid
       );
+
+      match /alerts/{alertId} {
+        allow create, read, update, delete: if canAccessChild(childId);
+      }
     }
 
     match /supervisors/{supervisorId} {
@@ -66,8 +122,9 @@ service cloud.firestore {
     }
 
     match /alerts/{alertId} {
-      allow create: if isAuthenticated() && request.resource.data.parentId is string;
-      allow read, update, delete: if resourceParentMatchesAuth();
+      allow create: if canCreateRootAlert();
+      allow read, delete: if resourceParentMatchesAuth();
+      allow update: if resourceParentMatchesAuth() || canPatchAlertUploadStateFromChild();
     }
 
     match /activities/{activityId} {
@@ -87,6 +144,96 @@ service cloud.firestore {
     }
 
     match /auditLogs/{auditId} {
+      allow create: if requestParentMatchesAuth();
+      allow read, update, delete: if resourceParentMatchesAuth();
+    }
+
+    match /auditTrail/{auditId} {
+      allow create: if requestParentMatchesAuth();
+      allow read, update, delete: if resourceParentMatchesAuth();
+    }
+
+    match /deviceHealth/{childId} {
+      allow read: if canAccessChild(childId);
+      allow create, update: if isAuthenticated()
+        && request.resource.data.childId is string
+        && request.resource.data.childId == childId
+        && canAccessChild(childId)
+        && request.resource.data.parentId is string
+        && request.resource.data.parentId == childParentId(childId);
+      allow delete: if isAuthenticated()
+        && childParentId(childId) == request.auth.uid;
+    }
+
+    match /deviceHealth/{childId}/history/{historyId} {
+      allow read: if canAccessChild(childId);
+      allow create: if isAuthenticated()
+        && canAccessChild(childId)
+        && request.resource.data.parentId is string
+        && request.resource.data.parentId == childParentId(childId);
+      allow update, delete: if isAuthenticated()
+        && childParentId(childId) == request.auth.uid;
+    }
+
+    match /vulnerabilityFindings/{childId} {
+      allow read: if canAccessChild(childId);
+      allow create, update: if isAuthenticated()
+        && request.resource.data.childId is string
+        && request.resource.data.childId == childId
+        && canAccessChild(childId)
+        && request.resource.data.parentId is string
+        && request.resource.data.parentId == childParentId(childId);
+      allow delete: if isAuthenticated()
+        && childParentId(childId) == request.auth.uid;
+    }
+
+    match /vulnerabilityFindings/{childId}/history/{scanId} {
+      allow read: if canAccessChild(childId);
+      allow create: if isAuthenticated()
+        && canAccessChild(childId)
+        && request.resource.data.parentId is string
+        && request.resource.data.parentId == childParentId(childId);
+      allow update, delete: if isAuthenticated()
+        && childParentId(childId) == request.auth.uid;
+    }
+
+    match /parentVulnerabilityFindings/{parentId} {
+      allow read, write: if isOwner(parentId);
+    }
+
+    match /parentVulnerabilityFindings/{parentId}/history/{eventId} {
+      allow read: if isOwner(parentId);
+      allow create: if isOwner(parentId)
+        && request.resource.data.parentId is string
+        && request.resource.data.parentId == parentId;
+      allow update, delete: if isOwner(parentId);
+    }
+
+    match /appUsage/{usageId} {
+      allow read: if resourceParentMatchesAuth();
+      allow create, update: if isAuthenticated()
+        && request.resource.data.childId is string
+        && canAccessChild(request.resource.data.childId)
+        && request.resource.data.parentId is string
+        && request.resource.data.parentId == childParentId(request.resource.data.childId);
+      allow delete: if resourceParentMatchesAuth();
+    }
+
+    match /tamperAlerts/{alertId} {
+      allow create: if isAuthenticated()
+        && request.resource.data.childId is string
+        && canAccessChild(request.resource.data.childId)
+        && request.resource.data.parentId is string
+        && request.resource.data.parentId == childParentId(request.resource.data.childId);
+      allow read, update, delete: if resourceParentMatchesAuth();
+    }
+
+    match /healthAlerts/{alertId} {
+      allow create: if requestParentMatchesAuth();
+      allow read, update, delete: if resourceParentMatchesAuth();
+    }
+
+    match /consents/{consentId} {
       allow create: if requestParentMatchesAuth();
       allow read, update, delete: if resourceParentMatchesAuth();
     }
@@ -122,4 +269,3 @@ service cloud.firestore {
     }
   }
 }
-

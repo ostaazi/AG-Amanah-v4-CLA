@@ -4,12 +4,20 @@ import {
   SystemAuditReport,
   AuditVulnerability,
 } from '../services/geminiService';
+import { formatTimeDefault } from '../services/dateTimeFormat';
 import { ICONS, AmanahShield, AmanahGlobalDefs } from '../constants';
+import VisualThresholdsLabCard from './VisualThresholdsLabCard';
+import TextRuleThresholdsLabCard from './TextRuleThresholdsLabCard';
 
 /**
  * Amanah Autonomous Restoration Engine (AARE)
  * محرك الترميم الذاتي: يقوم بإصلاح الكود آلياً وبشكل دائم.
  */
+
+interface DevLabViewProps {
+  lang?: 'ar' | 'en';
+  currentUserId?: string;
+}
 
 interface VirtualFile {
   path: string;
@@ -19,7 +27,7 @@ interface VirtualFile {
 
 const STORAGE_KEY = 'amanah_production_kernel_v4';
 
-const DevLabView: React.FC = () => {
+const DevLabView: React.FC<DevLabViewProps> = ({ lang = 'ar', currentUserId = '' }) => {
   const [report, setReport] = useState<SystemAuditReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
@@ -28,7 +36,10 @@ const DevLabView: React.FC = () => {
   const [vfs, setVfs] = useState<VirtualFile[]>([]);
 
   const log = useCallback((msg: string) => {
-    setTerminalLogs((prev) => [...prev.slice(-12), `[${new Date().toLocaleTimeString()}] ${msg}`]);
+    setTerminalLogs((prev) => [
+      ...prev.slice(-12),
+      `[${formatTimeDefault(new Date(), { includeSeconds: true })}] ${msg}`,
+    ]);
   }, []);
 
   // تهيئة النظام من الذاكرة الحقيقية
@@ -158,6 +169,8 @@ const DevLabView: React.FC = () => {
   return (
     <div className="max-w-7xl mx-auto space-y-10 pb-40 animate-in fade-in" dir="rtl">
       <AmanahGlobalDefs />
+      <TextRuleThresholdsLabCard lang={lang} parentId={currentUserId} />
+      <VisualThresholdsLabCard lang={lang} parentId={currentUserId} />
 
       {/* Dashboard Header */}
       <div className="bg-[#020617] rounded-[3.5rem] p-10 text-white shadow-2xl relative overflow-hidden border-b-8 border-emerald-600">

@@ -17,10 +17,14 @@ import {
   injectSelectedMockData,
   MOCK_DATA_DOMAINS,
   MockDataDomain,
+  MockDataVerificationReport,
+  verifyMockDataCleanup,
 } from '../services/mockDataService';
+import { canUseMockData } from '../services/firebaseConfig';
 import { generate2FASecret, getQRCodeUrl, verifyTOTP } from '../services/twoFAService';
 import { logoutUser } from '../services/authService';
 import { ValidationService } from '../services/validationService';
+import { formatDateTimeDefault, formatTimeDefault } from '../services/dateTimeFormat';
 import AvatarPickerModal from './AvatarPickerModal';
 import { QRCodeSVG } from 'qrcode.react';
 import { useStepUpGuard } from './auth/StepUpGuard';
@@ -160,6 +164,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     total: number;
     at: Date;
   } | null>(null);
+  const [mockCleanupReport, setMockCleanupReport] = useState<MockDataVerificationReport | null>(null);
 
   // Avatar Picker State
   const [pickerConfig, setPickerConfig] = useState<{
@@ -809,6 +814,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   );
 
   const isAllMockDomainsSelected = selectedMockDomains.length === MOCK_DATA_DOMAINS.length;
+  const mockOpsEnabled = canUseMockData();
 
   const toggleMockDomain = (domain: MockDataDomain) => {
     setSelectedMockDomains((prev) =>
@@ -823,9 +829,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   const showMockOpsDisabledToast = () => {
     showSuccessToast(
       lang === 'ar'
-        ? 'عمليات البيانات الوهمية متاحة فقط عبر المحاكي (Emulator).'
-        : 'Mock data operations are only allowed when the emulator is enabled.'
+        ? 'عمليات البيانات الوهمية معطّلة في هذه البيئة. فعّل Emulator أو VITE_ALLOW_LIVE_MOCK_MUTATIONS.'
+        : 'Mock data operations are disabled in this environment. Enable emulator or VITE_ALLOW_LIVE_MOCK_MUTATIONS.'
     );
+  };
+
+  const verifyMockCleanupForDomains = async (domains: MockDataDomain[]) => {
+    const report = await verifyMockDataCleanup(currentUser.id, domains);
+    setMockCleanupReport(report);
+    return report;
   };
 
   const handleInjectMockData = async () => {
@@ -835,6 +847,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
       const result = await injectSelectedMockData(currentUser.id, selectedMockDomains);
       const total = Object.values(result).reduce((acc, n) => acc + n, 0);
       setLastMockOperation({ mode: 'inject', result, total, at: new Date() });
+      setMockCleanupReport(null);
       showSuccessToast(
         lang === 'ar'
           ? `تم حقن بيانات تجريبية (${total})`
@@ -859,10 +872,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({
       const result = await clearSelectedMockData(currentUser.id, selectedMockDomains);
       const total = Object.values(result).reduce((acc, n) => acc + n, 0);
       setLastMockOperation({ mode: 'delete', result, total, at: new Date() });
+      const report = await verifyMockCleanupForDomains(selectedMockDomains);
       showSuccessToast(
-        lang === 'ar'
-          ? `تم حذف بيانات تجريبية (${total})`
-          : `Deleted mock records (${total})`
+        report.clean
+          ? lang === 'ar'
+            ? `تم حذف بيانات تجريبية (${total}) والتحقق من التنظيف بالكامل.`
+            : `Deleted mock records (${total}) and cleanup was verified.`
+          : lang === 'ar'
+            ? `تم الحذف (${total}) لكن ما زالت هناك بقايا mock: ${report.total}.`
+            : `Deleted (${total}) but mock residue is still present: ${report.total}.`
       );
     } catch (e: any) {
       if (String(e?.message || '').includes('MOCK_DATA_DISABLED')) {
@@ -871,6 +889,43 @@ const SettingsView: React.FC<SettingsViewProps> = ({
       }
       console.error('Clear mock data failed', e);
       showSuccessToast(lang === 'ar' ? 'تعذر حذف البيانات الوهمية' : 'Failed to delete mock data');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleVerifyMockCleanup = async () => {
+    if (selectedMockDomains.length === 0 || isProcessing) return;
+    setIsProcessing(true);
+    try {
+      const report = await verifyMockCleanupForDomains(selectedMockDomains);
+      if (report.clean) {
+        showSuccessToast(
+          lang === 'ar'
+            ? 'التحقق ناجح: لا توجد أي بقايا للبيانات الوهمية في النطاقات المحددة.'
+            : 'Verification passed: no mock residue found for selected domains.'
+        );
+      } else if (report.inaccessible.length > 0) {
+        const labels = report.inaccessible.map((domain) => mockDomainLabelMap[domain]).join(', ');
+        showSuccessToast(
+          lang === 'ar'
+            ? `تعذر التحقق الكامل من بعض النطاقات بسبب الصلاحيات: ${labels}`
+            : `Could not fully verify some domains due to permissions: ${labels}`
+        );
+      } else {
+        showSuccessToast(
+          lang === 'ar'
+            ? `تم العثور على بقايا mock بعدد ${report.total}.`
+            : `Mock residue detected: ${report.total}.`
+        );
+      }
+    } catch (e: any) {
+      if (String(e?.message || '').includes('MOCK_DATA_DISABLED')) {
+        showMockOpsDisabledToast();
+        return;
+      }
+      console.error('Verify mock cleanup failed', e);
+      showSuccessToast(lang === 'ar' ? 'تعذر التحقق من حالة بيانات mock' : 'Failed to verify mock cleanup');
     } finally {
       setIsProcessing(false);
     }
@@ -948,10 +1003,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           const result = await clearSelectedMockData(currentUser.id, [...MOCK_DATA_DOMAINS]);
           const total = Object.values(result).reduce((acc, n) => acc + n, 0);
           setLastMockOperation({ mode: 'delete', result, total, at: new Date() });
+          const report = await verifyMockCleanupForDomains([...MOCK_DATA_DOMAINS]);
           showSuccessToast(
-            lang === 'ar'
-              ? `تم حذف كل البيانات الوهمية (${total})`
-              : `Deleted all mock records (${total})`
+            report.clean
+              ? lang === 'ar'
+                ? `تم حذف كل البيانات الوهمية (${total}) والتحقق من عدم وجود أي بقايا.`
+                : `Deleted all mock records (${total}) and verified zero residue.`
+              : lang === 'ar'
+                ? `تم الحذف (${total}) لكن ما زالت هناك بقايا mock: ${report.total}.`
+                : `Deleted (${total}) but mock residue is still present: ${report.total}.`
           );
         } catch (e: any) {
           if (String(e?.message || '').includes('MOCK_DATA_DISABLED')) {
@@ -986,7 +1046,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     currentUser.enabledFeatures?.allLocksDisabledPermanently === true;
   const isAllLocksDisableActive = isLockDisablePermanentActive || isLockDisableTemporaryActive;
   const lockDisableUntilLabel = isLockDisableTemporaryActive
-    ? new Date(lockDisableUntilTs).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US')
+    ? formatDateTimeDefault(lockDisableUntilTs, { includeSeconds: false })
     : '';
   const normalizedCurrentEmail = String(currentUser.email || '').trim().toLowerCase();
   const normalizedCurrentPhone = normalizePhoneInput(currentUser.phone || '');
@@ -2324,6 +2384,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({
               ? 'اختر الأنواع المطلوبة ثم نفّذ حقن أو حذف البيانات الوهمية.'
               : 'Select domains then inject or delete mock data.'}
           </p>
+          <p className={`mt-2 text-[11px] font-black ${mockOpsEnabled ? 'text-emerald-600' : 'text-amber-700'}`}>
+            {mockOpsEnabled
+              ? lang === 'ar'
+                ? 'حالة البيئة: عمليات Mock مفعّلة.'
+                : 'Environment status: mock operations are enabled.'
+              : lang === 'ar'
+                ? 'حالة البيئة: عمليات Mock معطلة. فعّل Emulator أو VITE_ALLOW_LIVE_MOCK_MUTATIONS=true.'
+                : 'Environment status: mock operations are disabled. Enable emulator or VITE_ALLOW_LIVE_MOCK_MUTATIONS=true.'}
+          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -2361,7 +2430,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             onClick={() => {
               void requireStepUp('SENSITIVE_SETTINGS', handleInjectMockData);
             }}
-            disabled={isProcessing || selectedMockDomains.length === 0}
+            disabled={isProcessing || selectedMockDomains.length === 0 || !mockOpsEnabled}
             className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs shadow-lg disabled:opacity-50"
           >
             {lang === 'ar' ? 'حقن بيانات وهمية' : 'Inject mock data'}
@@ -2371,10 +2440,18 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             onClick={() => {
               void requireStepUp('SENSITIVE_SETTINGS', handleClearMockData);
             }}
-            disabled={isProcessing || selectedMockDomains.length === 0}
+            disabled={isProcessing || selectedMockDomains.length === 0 || !mockOpsEnabled}
             className="px-8 py-4 bg-white text-indigo-700 rounded-2xl font-black text-xs shadow-lg border border-indigo-200 disabled:opacity-50"
           >
             {lang === 'ar' ? 'حذف البيانات الوهمية المحددة' : 'Delete selected mock data'}
+          </button>
+          <button
+            type="button"
+            onClick={handleVerifyMockCleanup}
+            disabled={isProcessing || selectedMockDomains.length === 0}
+            className="px-8 py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs shadow-lg disabled:opacity-50"
+          >
+            {lang === 'ar' ? 'تحقق من التنظيف' : 'Verify cleanup'}
           </button>
         </div>
 
@@ -2407,8 +2484,57 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
             <p className="text-[10px] font-bold text-slate-400">
               {lang === 'ar'
-                ? `وقت التنفيذ: ${lastMockOperation.at.toLocaleTimeString()}`
-                : `Executed at: ${lastMockOperation.at.toLocaleTimeString()}`}
+                ? `وقت التنفيذ: ${formatTimeDefault(lastMockOperation.at, { includeSeconds: true })}`
+                : `Executed at: ${formatTimeDefault(lastMockOperation.at, { includeSeconds: true })}`}
+            </p>
+          </div>
+        )}
+
+        {mockCleanupReport && (
+          <div
+            className={`rounded-[2rem] border p-5 space-y-3 ${mockCleanupReport.clean ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className={`text-sm font-black ${mockCleanupReport.clean ? 'text-emerald-800' : 'text-amber-800'}`}>
+                {mockCleanupReport.clean
+                  ? lang === 'ar'
+                    ? 'نتيجة التحقق: لا توجد بقايا Mock.'
+                    : 'Verification result: no mock residue.'
+                  : lang === 'ar'
+                    ? 'نتيجة التحقق: توجد بقايا Mock تحتاج تنظيفًا.'
+                    : 'Verification result: mock residue is still present.'}
+              </p>
+              <p className={`text-xs font-black ${mockCleanupReport.clean ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {lang === 'ar' ? `إجمالي البقايا: ${mockCleanupReport.total}` : `Total residue: ${mockCleanupReport.total}`}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {MOCK_DATA_DOMAINS.map((domain) => (
+                <div
+                  key={`verify-${domain}`}
+                  className="px-4 py-3 bg-white rounded-xl border border-slate-100 flex items-center justify-between"
+                >
+                  <span className="text-xs font-black text-slate-600">{mockDomainLabelMap[domain]}</span>
+                  <span className="text-sm font-black text-slate-800">
+                    {mockCleanupReport.counts[domain] || 0}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {mockCleanupReport.inaccessible.length > 0 && (
+              <p className="text-[11px] font-black text-amber-800">
+                {lang === 'ar'
+                  ? `تعذر التحقق من بعض النطاقات بسبب الصلاحيات: ${mockCleanupReport.inaccessible.map((domain) => mockDomainLabelMap[domain]).join(', ')}`
+                  : `Could not verify some domains due to permissions: ${mockCleanupReport.inaccessible.map((domain) => mockDomainLabelMap[domain]).join(', ')}`}
+              </p>
+            )}
+
+            <p className="text-[10px] font-bold text-slate-500">
+              {lang === 'ar'
+                ? `وقت التحقق: ${formatDateTimeDefault(mockCleanupReport.checkedAt, { includeSeconds: true })}`
+                : `Verified at: ${formatDateTimeDefault(mockCleanupReport.checkedAt, { includeSeconds: true })}`}
             </p>
           </div>
         )}
@@ -2439,7 +2565,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           <button
             type="button"
             onClick={() => setPendingDelete({ kind: 'purge', source: 'purge' })}
-            disabled={isProcessing}
+            disabled={isProcessing || !mockOpsEnabled}
             className="px-8 py-4 bg-red-600 text-white rounded-2xl font-black text-xs shadow-lg"
           >
             {lang === 'ar' ? 'حذف كل البيانات الوهمية' : 'Delete all mock data'}

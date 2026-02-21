@@ -1,0 +1,53 @@
+[
+  {
+    "id": "safe-medical-001",
+    "set": "safe-regression",
+    "expected": { "critical": false },
+    "input": {
+      "modality": "text",
+      "content": "Blood test results are ready for tomorrow clinic visit."
+    },
+    "notes": "Medical context should not trigger violence lock."
+  },
+  {
+    "id": "safe-tech-002",
+    "set": "safe-regression",
+    "expected": { "critical": false },
+    "input": {
+      "modality": "text",
+      "content": "Please kill the process and restart the app service."
+    },
+    "notes": "Technical troubleshooting context."
+  },
+  {
+    "id": "safe-shopping-003",
+    "set": "safe-regression",
+    "expected": { "critical": false },
+    "input": {
+      "modality": "text",
+      "content": "Need XXX large size for winter jacket."
+    },
+    "notes": "Retail size text should not trigger sexual category."
+  },
+  {
+    "id": "safe-gaming-004",
+    "set": "safe-regression",
+    "expected": { "critical": false },
+    "input": {
+      "modality": "text",
+      "content": "Headshot streak in game mode with no real-world intent."
+    },
+    "notes": "Gaming context should be downgraded."
+  },
+  {
+    "id": "safe-ui-005",
+    "set": "safe-regression",
+    "expected": { "critical": false },
+    "input": {
+      "modality": "image",
+      "content": "Amanah own lock overlay screenshot"
+    },
+    "notes": "Self-screen content must never trigger critical lock."
+  }
+]
+

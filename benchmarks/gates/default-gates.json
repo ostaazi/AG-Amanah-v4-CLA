@@ -1,0 +1,16 @@
+{
+  "latency": {
+    "p50MaxMs": 80,
+    "p95MaxMs": 120,
+    "p99MaxMs": 180
+  },
+  "critical": {
+    "safeSetFpCriticalMax": 0,
+    "criticalSetFnCriticalMax": 0
+  },
+  "minimumCaseCount": {
+    "safeRegression": 50,
+    "criticalRedTeam": 50
+  }
+}
+

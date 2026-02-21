@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertSeverity, Child, IncidentReport, MonitoringAlert } from '../types';
 import { sovereignApi } from '../services/sovereignApiService';
+import { formatDateTimeDefault } from '../services/dateTimeFormat';
 
 interface IncidentsCenterViewProps {
   alerts: MonitoringAlert[];
@@ -108,7 +109,7 @@ const IncidentsCenterView: React.FC<IncidentsCenterViewProps> = ({
                     {incident.incident_type}
                   </h3>
                   <p className="text-xs font-bold text-slate-500">
-                    {incident.childName} • {new Date(incident.created_at).toLocaleString()}
+                    {incident.childName} • {formatDateTimeDefault(incident.created_at, { includeSeconds: true })}
                   </p>
                   {!!incident.summary && (
                     <p className="text-sm font-bold text-slate-600">{incident.summary}</p>
@@ -142,4 +143,3 @@ const IncidentsCenterView: React.FC<IncidentsCenterViewProps> = ({
 };
 
 export default IncidentsCenterView;
-

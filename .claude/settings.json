@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell.exe -Command '$env:JAVA_HOME = \"\"C:\\\\Program Files\\\\Eclipse Adoptium\\\\jdk-21.0.10.7-hotspot\"\"; $env:ANDROID_HOME = \"\"$env:LOCALAPPDATA\\\\Android\\\\Sdk\"\"; $env:ANDROID_SDK_ROOT = \"\"$env:LOCALAPPDATA\\\\Android\\\\Sdk\"\"; & \"\"d:\\\\Projects\\\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\\\android-child\\\\gradlew.bat\"\" -p \"\"d:\\\\Projects\\\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\\\android-child\"\" assembleDebug --no-daemon 2>&1')"
+    ]
+  }
+}

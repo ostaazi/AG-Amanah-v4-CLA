@@ -33,6 +33,8 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import java.util.Locale
+import java.util.UUID
 
 class ScreenGuardianService : Service() {
     companion object {
@@ -57,17 +59,102 @@ class ScreenGuardianService : Service() {
     private var isProcessing = false
     private val SCREEN_CHECK_INTERVAL = 3000L
     private val LIVE_FRAME_UPLOAD_INTERVAL = 3000L
-    // Temporary kill-switch: disable on-device visual model to isolate lock root cause.
-    // Web-side visualSentinel.ts remains available for controlled visual investigation.
-    private val ON_DEVICE_VISUAL_MODEL_ENABLED = false
+    private val ALERT_UPLOAD_RETRY_INTERVAL_MS = 15_000L
+    private val ALERT_TERMINAL_RETRY_INTERVAL_MS = 60_000L
+    private val MAX_PENDING_ALERT_UPLOADS = 40
+    private val MAX_ALERT_UPLOAD_ATTEMPTS = 6
+    private val EVIDENCE_TELEMETRY_PREFS = "ScreenGuardianEvidenceTelemetry"
+    private val EVIDENCE_COUNTER_BUNDLE_TOTAL = "bundle_total"
+    private val EVIDENCE_COUNTER_BUNDLE_COMPLETE = "bundle_complete"
+    private val EVIDENCE_COUNTER_BUNDLE_PARTIAL = "bundle_partial"
+    private val EVIDENCE_COUNTER_MISSING_RAW_TEXT = "missing_raw_text"
+    private val EVIDENCE_COUNTER_MISSING_NORMALIZED_TEXT = "missing_normalized_text"
+    private val EVIDENCE_COUNTER_MISSING_MATCHED_SIGNALS = "missing_matched_signals"
+    private val EVIDENCE_COUNTER_MISSING_SNAPSHOT = "missing_snapshot"
+    private val EVIDENCE_COUNTER_UPLOAD_ATTEMPT = "upload_attempt"
+    private val EVIDENCE_COUNTER_UPLOAD_SUCCESS = "upload_success"
+    private val EVIDENCE_COUNTER_UPLOAD_RETRY_QUEUED = "upload_retry_queued"
+    private val EVIDENCE_COUNTER_UPLOAD_TERMINAL_FAILED = "upload_terminal_failed"
+    private val EVIDENCE_COUNTER_QUEUE_OVERFLOW_DROP = "upload_queue_overflow_drop"
+    private val EVIDENCE_CORE_FIELDS = listOf(
+        "triggerRawText",
+        "triggerNormalizedText",
+        "analysisReasonAr",
+        "analysisReasonEn",
+        "matchedSignals",
+        "imageData"
+    )
+    // On-device visual stack: TFLite NSFW + violence scene model + injury heuristic
+    private val ON_DEVICE_VISUAL_MODEL_ENABLED = true
     private var visualModelDisableNoticeLogged = false
     private var lastLiveFrameUploadAt = 0L
     private var streamMode = false
+    private val pendingAlertLock = Any()
+    private val pendingAlertUploads = mutableListOf<PendingAlertUpload>()
+
+    private data class PendingAlertUpload(
+        val correlationId: String,
+        val payload: HashMap<String, Any>,
+        var attempts: Int,
+        var nextRetryAt: Long,
+        var lastError: String,
+        val queuedAt: Long,
+        var terminalFailure: Boolean = false
+    )
+
+    private data class EvidenceBundleTelemetry(
+        val sequence: Long,
+        val missingFields: List<String>,
+        val presentFields: Int,
+        val completeness: Float
+    )
+
+    private val retryPendingAlertsRunnable = object : Runnable {
+        override fun run() {
+            try {
+                flushPendingAlertUploads()
+            } catch (error: Exception) {
+                Log.w("ScreenGuardian", "Pending alert retry loop failed: ${error.message}")
+            } finally {
+                controlHandler.postDelayed(this, ALERT_UPLOAD_RETRY_INTERVAL_MS)
+            }
+        }
+    }
 
     private val latinTextRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     // Relying only on the Latin recognizer which should handle multiple languages when default options are used.
     private val arabicTextRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private val db by lazy { FirebaseFirestore.getInstance() }
+    private val selfPackagePrefixes = listOf(
+        "com.amanah.child",
+        "com.amanah.parent",
+        "com.amanah"
+    )
+    private val systemUiMarkers = listOf(
+        "systemui",
+        "launcher",
+        "oneui",
+        "miui"
+    )
+    private val selfUiMarkers = listOf(
+        "amanah",
+        "amanah shield",
+        "amanah security",
+        "amanah ai",
+        "v1 0 stable gold",
+        "screen monitor",
+        "security cortex",
+        "turbo spectrum",
+        "offline emergency unlock",
+        "emergency code",
+        "parental safety policy",
+        "المحتوى المرصود",
+        "تحليل الذكاء الاصطناعي",
+        "سبب التصنيف غير اللائق",
+        "إشارة عالية الخطورة",
+        "تم قفل الجهاز",
+        "parent protection policy"
+    )
 
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -88,6 +175,7 @@ class ScreenGuardianService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        SecurityCortex.init(this)
         val filter = android.content.IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
@@ -97,6 +185,7 @@ class ScreenGuardianService : Service() {
         workerThread = HandlerThread("ScreenGuardianWorker")
         workerThread.start()
         workerHandler = Handler(workerThread.looper)
+        controlHandler.postDelayed(retryPendingAlertsRunnable, ALERT_UPLOAD_RETRY_INTERVAL_MS)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -214,27 +303,66 @@ class ScreenGuardianService : Service() {
                 cropped
             }
 
-            captureFrameSnapshot(scaled)
-            if (ON_DEVICE_VISUAL_MODEL_ENABLED) {
-                val visualAnalysis = SecurityCortex.analyzeImage(scaled)
-                if (visualAnalysis.isDanger) {
-                    Log.e("ScreenGuardian", "Visual threat: ${visualAnalysis.category} ${visualAnalysis.score}")
-                    handleThreat(
-                        analysis = visualAnalysis,
-                        platform = "Screen Monitor",
-                        content = "رصد محتوى بصري غير لائق (${visualAnalysis.category})",
-                        aiAnalysis = "On-device visual detection | confidence=${(visualAnalysis.score * 100).toInt()}% | severity=${visualAnalysis.severity}"
+            val frameData = captureFrameSnapshot(scaled)
+            val foregroundPackage = getForegroundPackage()
+            val visualAnalysis = if (ON_DEVICE_VISUAL_MODEL_ENABLED) {
+                SecurityCortex.analyzeImage(scaled)
+            } else {
+                if (!visualModelDisableNoticeLogged) {
+                    visualModelDisableNoticeLogged = true
+                    Log.w(
+                        "ScreenGuardian",
+                        "On-device visual model is temporarily disabled; visual lock path is bypassed."
                     )
                 }
-            } else if (!visualModelDisableNoticeLogged) {
-                visualModelDisableNoticeLogged = true
-                Log.w(
-                    "ScreenGuardian",
-                    "On-device visual model is temporarily disabled; visual lock path is bypassed."
-                )
+                null
             }
 
-            runTextOcrPipeline(scaled)
+            runTextOcrPipeline(scaled, frameData, foregroundPackage) { mergedText ->
+                try {
+                    val analysis = visualAnalysis
+                    if (analysis != null && analysis.isDanger) {
+                        val selfIgnoreReason = resolveSelfThreatIgnoreReason(foregroundPackage, mergedText)
+                        if (selfIgnoreReason != null) {
+                            Log.i(
+                                "ScreenGuardian",
+                                "Self-screen visual match ignored (pkg=$foregroundPackage, category=${analysis.category}, reason=$selfIgnoreReason)."
+                            )
+                        } else {
+                            val normalizedText = if (mergedText.isNotBlank()) {
+                                SecurityCortex.normalizeTextForAudit(mergedText)
+                            } else {
+                                null
+                            }
+                            val detector = when {
+                                analysis.matchedSignals.any { it.contains("detector=nsfw_model", ignoreCase = true) } -> "nsfw_model"
+                                analysis.matchedSignals.any { it.contains("detector=violence_scene_model", ignoreCase = true) } -> "violence_scene_model"
+                                analysis.matchedSignals.any { it.contains("detector=injury_heuristic", ignoreCase = true) } -> "injury_heuristic"
+                                else -> "unknown"
+                            }
+                            val detectorSummary = when (detector) {
+                                "nsfw_model" -> "On-device NSFW model detection"
+                                "violence_scene_model" -> "On-device violence-scene model detection"
+                                "injury_heuristic" -> "On-device injury-cluster visual detection"
+                                else -> "On-device visual detection"
+                            }
+                            Log.e("ScreenGuardian", "Visual threat: ${analysis.category} ${analysis.score}")
+                            handleThreat(
+                                analysis = analysis,
+                                platform = "Screen Monitor",
+                                content = "رصد بصري: ${analysis.category}",
+                                aiAnalysis = "$detectorSummary | detector=$detector | confidence=${(analysis.score * 100).toInt()}% | severity=${analysis.severity}",
+                                triggerType = "IMAGE",
+                                triggerRawText = mergedText.takeIf { it.isNotBlank() },
+                                triggerNormalizedText = normalizedText,
+                                evidenceImageData = frameData
+                            )
+                        }
+                    }
+                } finally {
+                    scaled.recycle()
+                }
+            }
         } catch (e: Exception) {
             Log.e("ScreenGuardian", "Error processing frame", e)
             scaled?.recycle()
@@ -244,7 +372,12 @@ class ScreenGuardianService : Service() {
         }
     }
 
-    private fun runTextOcrPipeline(bitmap: Bitmap) {
+    private fun runTextOcrPipeline(
+        bitmap: Bitmap,
+        frameData: String?,
+        foregroundPackage: String,
+        onComplete: (String) -> Unit
+    ) {
         val inputImage = InputImage.fromBitmap(bitmap, 0)
         val latinTask = latinTextRecognizer.process(inputImage).continueWith { it.result?.text ?: "" }
         val arabicTask = arabicTextRecognizer.process(inputImage).continueWith { it.result?.text ?: "" }
@@ -253,35 +386,51 @@ class ScreenGuardianService : Service() {
             .addOnSuccessListener { texts ->
                 val mergedText = texts.joinToString(" ").replace(Regex("\\s+"), " ").trim()
                 if (mergedText.length >= 3) {
+                    val selfIgnoreReason = resolveSelfThreatIgnoreReason(foregroundPackage, mergedText)
+                    if (selfIgnoreReason != null) {
+                        Log.i(
+                            "ScreenGuardian",
+                            "Self-screen OCR match ignored (pkg=$foregroundPackage, reason=$selfIgnoreReason)."
+                        )
+                        onComplete(mergedText)
+                        return@addOnSuccessListener
+                    }
+
                     val textAnalysis = SecurityCortex.analyzeText(mergedText)
                     if (textAnalysis.isDanger) {
                         Log.e("ScreenGuardian", "OCR text threat: ${textAnalysis.category}")
+                        val normalizedText = SecurityCortex.normalizeTextForAudit(mergedText)
                         handleThreat(
                             analysis = textAnalysis,
                             platform = "Screen OCR",
-                            content = mergedText.take(400),
-                            aiAnalysis = "On-device OCR + text policy detection"
+                            content = mergedText.take(500),
+                            aiAnalysis = "On-device OCR + text policy detection",
+                            triggerType = "TEXT",
+                            triggerRawText = mergedText,
+                            triggerNormalizedText = normalizedText,
+                            evidenceImageData = frameData
                         )
                     }
                 }
-                bitmap.recycle()
+                onComplete(mergedText)
             }
             .addOnFailureListener { e ->
                 Log.e("ScreenGuardian", "OCR pipeline failed", e)
-                bitmap.recycle()
+                onComplete("")
             }
     }
 
-    private fun captureFrameSnapshot(bitmap: Bitmap) {
-        val frameData = encodeBitmapToDataUrl(bitmap) ?: return
+    private fun captureFrameSnapshot(bitmap: Bitmap): String? {
+        val frameData = encodeBitmapToDataUrl(bitmap) ?: return null
         latestFrameData = frameData
 
-        if (!streamMode) return
+        if (!streamMode) return frameData
 
         val now = System.currentTimeMillis()
-        if (now - lastLiveFrameUploadAt < LIVE_FRAME_UPLOAD_INTERVAL) return
+        if (now - lastLiveFrameUploadAt < LIVE_FRAME_UPLOAD_INTERVAL) return frameData
         lastLiveFrameUploadAt = now
         uploadLiveFrame(frameData)
+        return frameData
     }
 
     private fun encodeBitmapToDataUrl(bitmap: Bitmap): String? {
@@ -341,22 +490,271 @@ class ScreenGuardianService : Service() {
             }
     }
 
+    private fun incrementEvidenceCounter(key: String, delta: Long = 1L): Long {
+        val prefs = getSharedPreferences(EVIDENCE_TELEMETRY_PREFS, MODE_PRIVATE)
+        val next = (prefs.getLong(key, 0L) + delta).coerceAtLeast(0L)
+        prefs.edit().putLong(key, next).apply()
+        return next
+    }
+
+    private fun computeEvidenceBundleTelemetry(
+        rawText: String,
+        normalizedText: String,
+        reasonAr: String,
+        reasonEn: String,
+        matchedSignals: List<String>,
+        hasSnapshot: Boolean
+    ): EvidenceBundleTelemetry {
+        val missingFields = mutableListOf<String>()
+        val sequence = incrementEvidenceCounter(EVIDENCE_COUNTER_BUNDLE_TOTAL)
+
+        if (rawText.isBlank()) {
+            missingFields.add("triggerRawText")
+            incrementEvidenceCounter(EVIDENCE_COUNTER_MISSING_RAW_TEXT)
+        }
+        if (normalizedText.isBlank()) {
+            missingFields.add("triggerNormalizedText")
+            incrementEvidenceCounter(EVIDENCE_COUNTER_MISSING_NORMALIZED_TEXT)
+        }
+        if (reasonAr.isBlank()) {
+            missingFields.add("analysisReasonAr")
+        }
+        if (reasonEn.isBlank()) {
+            missingFields.add("analysisReasonEn")
+        }
+        if (matchedSignals.isEmpty()) {
+            missingFields.add("matchedSignals")
+            incrementEvidenceCounter(EVIDENCE_COUNTER_MISSING_MATCHED_SIGNALS)
+        }
+        if (!hasSnapshot) {
+            missingFields.add("imageData")
+            incrementEvidenceCounter(EVIDENCE_COUNTER_MISSING_SNAPSHOT)
+        }
+
+        if (missingFields.isEmpty()) {
+            incrementEvidenceCounter(EVIDENCE_COUNTER_BUNDLE_COMPLETE)
+        } else {
+            incrementEvidenceCounter(EVIDENCE_COUNTER_BUNDLE_PARTIAL)
+        }
+
+        val presentFields = (EVIDENCE_CORE_FIELDS.size - missingFields.size).coerceAtLeast(0)
+        val completeness = if (EVIDENCE_CORE_FIELDS.isEmpty()) {
+            1f
+        } else {
+            presentFields.toFloat() / EVIDENCE_CORE_FIELDS.size.toFloat()
+        }
+
+        return EvidenceBundleTelemetry(
+            sequence = sequence,
+            missingFields = missingFields,
+            presentFields = presentFields,
+            completeness = completeness
+        )
+    }
+
+    private fun nextRetryDelayMs(attempts: Int): Long {
+        val step = attempts.coerceAtLeast(1).coerceAtMost(5) - 1
+        val factor = 1L shl step
+        return ALERT_UPLOAD_RETRY_INTERVAL_MS * factor
+    }
+
+    private fun queueAlertRetry(
+        correlationId: String,
+        payload: HashMap<String, Any>,
+        attempts: Int,
+        error: String,
+        terminalFailure: Boolean = false
+    ) {
+        val shouldMarkTerminal = terminalFailure || attempts >= MAX_ALERT_UPLOAD_ATTEMPTS
+        val now = System.currentTimeMillis()
+        val nextRetryAt = if (shouldMarkTerminal) {
+            now + ALERT_TERMINAL_RETRY_INTERVAL_MS
+        } else {
+            now + nextRetryDelayMs(attempts)
+        }
+        if (shouldMarkTerminal) {
+            payload["evidenceUploadStatus"] = "FAILED"
+            payload["evidenceUploadRetryCount"] = attempts.coerceAtLeast(0)
+            payload["evidenceUploadLastError"] = error.take(220)
+        }
+        synchronized(pendingAlertLock) {
+            val existing = pendingAlertUploads.firstOrNull { it.correlationId == correlationId }
+            if (existing != null) {
+                existing.attempts = attempts
+                existing.lastError = error
+                existing.nextRetryAt = nextRetryAt
+                existing.terminalFailure = shouldMarkTerminal
+            } else {
+                if (pendingAlertUploads.size >= MAX_PENDING_ALERT_UPLOADS) {
+                    pendingAlertUploads.removeAt(0)
+                    incrementEvidenceCounter(EVIDENCE_COUNTER_QUEUE_OVERFLOW_DROP)
+                }
+                pendingAlertUploads.add(
+                    PendingAlertUpload(
+                        correlationId = correlationId,
+                        payload = payload,
+                        attempts = attempts,
+                        nextRetryAt = nextRetryAt,
+                        lastError = error,
+                        queuedAt = now,
+                        terminalFailure = shouldMarkTerminal
+                    )
+                )
+            }
+        }
+        if (shouldMarkTerminal) {
+            incrementEvidenceCounter(EVIDENCE_COUNTER_UPLOAD_TERMINAL_FAILED)
+            Log.e(
+                "ScreenGuardian",
+                "Alert moved to terminal-failure queue (correlationId=$correlationId, attempts=$attempts, retryInMs=${nextRetryAt - now}, error=$error)."
+            )
+        } else {
+            incrementEvidenceCounter(EVIDENCE_COUNTER_UPLOAD_RETRY_QUEUED)
+            Log.w(
+                "ScreenGuardian",
+                "Queued alert retry (correlationId=$correlationId, attempts=$attempts, retryInMs=${nextRetryAt - now}, error=$error)."
+            )
+        }
+    }
+
+    private fun removeQueuedAlert(correlationId: String) {
+        synchronized(pendingAlertLock) {
+            pendingAlertUploads.removeAll { it.correlationId == correlationId }
+        }
+    }
+
+    private fun flushPendingAlertUploads() {
+        val pending = synchronized(pendingAlertLock) {
+            pendingAlertUploads.firstOrNull { it.nextRetryAt <= System.currentTimeMillis() }
+        } ?: return
+
+        val payload = HashMap(pending.payload)
+        uploadAlertPayload(
+            payload = payload,
+            attempt = pending.attempts + 1,
+            source = "retry_queue",
+            correlationId = pending.correlationId,
+            terminalFailure = pending.terminalFailure
+        )
+    }
+
+    private fun uploadAlertPayload(
+        payload: HashMap<String, Any>,
+        attempt: Int,
+        source: String,
+        correlationId: String,
+        terminalFailure: Boolean = false
+    ) {
+        incrementEvidenceCounter(EVIDENCE_COUNTER_UPLOAD_ATTEMPT)
+        payload["evidenceUploadStatus"] = if (terminalFailure) "FAILED" else "UPLOADING"
+        payload["evidenceUploadAttempt"] = attempt
+        payload["evidenceUploadSource"] = source
+        payload["evidenceUploadLastAttemptAt"] = Timestamp.now()
+        payload["evidenceUploadCorrelationId"] = correlationId
+
+        db.collection("alerts").add(payload)
+            .addOnSuccessListener { ref ->
+                removeQueuedAlert(correlationId)
+                if (terminalFailure) {
+                    val failedUpdate = hashMapOf<String, Any?>(
+                        "evidenceUploadStatus" to "FAILED",
+                        "evidenceUploadAckAt" to Timestamp.now(),
+                        "evidenceUploadRetryCount" to attempt.coerceAtLeast(0),
+                        "evidenceUploadLastError" to (payload["evidenceUploadLastError"] as? String ?: "upload_failed")
+                    )
+                    db.collection("alerts").document(ref.id).update(failedUpdate)
+                        .addOnFailureListener { terminalAckError ->
+                            Log.w(
+                                "ScreenGuardian",
+                                "Terminal failure alert uploaded but ACK patch failed (doc=${ref.id}, correlationId=$correlationId): ${terminalAckError.message}"
+                            )
+                        }
+                    return@addOnSuccessListener
+                }
+                incrementEvidenceCounter(EVIDENCE_COUNTER_UPLOAD_SUCCESS)
+                val ackUpdate = hashMapOf<String, Any?>(
+                    "evidenceUploadStatus" to "UPLOADED",
+                    "evidenceUploadAckAt" to Timestamp.now(),
+                    "evidenceUploadRetryCount" to (attempt - 1).coerceAtLeast(0),
+                    "evidenceUploadLastError" to null
+                )
+                db.collection("alerts").document(ref.id).update(ackUpdate)
+                    .addOnFailureListener { ackError ->
+                        Log.w(
+                            "ScreenGuardian",
+                            "Alert uploaded but ACK patch failed (doc=${ref.id}, correlationId=$correlationId): ${ackError.message}"
+                        )
+                    }
+            }
+            .addOnFailureListener { error ->
+                payload["evidenceUploadStatus"] = "RETRY_QUEUED"
+                payload["evidenceUploadAttempt"] = attempt
+                payload["evidenceUploadLastError"] = (error.message ?: "upload_failed").take(220)
+                queueAlertRetry(
+                    correlationId = correlationId,
+                    payload = payload,
+                    attempts = attempt,
+                    error = (error.message ?: "upload_failed"),
+                    terminalFailure = terminalFailure
+                )
+            }
+    }
+
     private fun handleThreat(
         analysis: SecurityCortex.AnalysisResult,
         platform: String,
         content: String,
-        aiAnalysis: String
+        aiAnalysis: String,
+        triggerType: String,
+        triggerRawText: String? = null,
+        triggerNormalizedText: String? = null,
+        evidenceImageData: String? = null
     ) {
         val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
         val parentId = prefs.getString("parentId", null) ?: return
         val childName = prefs.getString("childName", "My Child") ?: "My Child"
         val childId = prefs.getString("childDocumentId", null)
-        val foregroundPackage = prefs.getString("lastForegroundPackage", null)?.trim().orEmpty()
+        val foregroundPackage = getForegroundPackage()
         val foregroundAt = prefs.getLong("lastForegroundAt", 0L)
-        val aiSummary = if (foregroundPackage.isNotBlank()) {
-            "$aiAnalysis | app=$foregroundPackage"
-        } else {
-            aiAnalysis
+        val selfIgnoreReason = resolveSelfThreatIgnoreReason(foregroundPackage, triggerRawText)
+        if (selfIgnoreReason != null) {
+            Log.i(
+                "ScreenGuardian",
+                "Threat dropped as self-content (pkg=$foregroundPackage, reason=$selfIgnoreReason)."
+            )
+            return
+        }
+
+        val rawText = triggerRawText?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+        val normalizedText = when {
+            !triggerNormalizedText.isNullOrBlank() -> triggerNormalizedText
+            rawText.isNotBlank() -> SecurityCortex.normalizeTextForAudit(rawText)
+            else -> ""
+        }
+        val obfuscationLikely = isLikelyObfuscated(rawText, normalizedText)
+        val reasonAr = analysis.reasonAr.ifBlank {
+            "تم رصد مؤشر خطورة ضمن فئة ${analysis.category} بدرجة ${analysis.severity}."
+        }
+        val reasonEn = analysis.reasonEn.ifBlank {
+            "Risk indicator detected in category ${analysis.category} with severity ${analysis.severity}."
+        }
+        val matchedSignals = analysis.matchedSignals.take(8)
+        val frame = if (!evidenceImageData.isNullOrBlank()) evidenceImageData else latestFrameData
+        val hasSnapshot = !frame.isNullOrBlank()
+        val bundleTelemetry = computeEvidenceBundleTelemetry(
+            rawText = rawText,
+            normalizedText = normalizedText,
+            reasonAr = reasonAr,
+            reasonEn = reasonEn,
+            matchedSignals = matchedSignals,
+            hasSnapshot = hasSnapshot
+        )
+        val localLockEligible = shouldAutoLockLocally(analysis, triggerType)
+        val aiSummary = buildString {
+            append(aiAnalysis)
+            if (foregroundPackage.isNotBlank()) append(" | app=$foregroundPackage")
+            append(" | AR: $reasonAr")
+            append(" | EN: $reasonEn")
         }
 
         val alert = hashMapOf<String, Any>(
@@ -370,7 +768,29 @@ class ScreenGuardianService : Service() {
             "status" to "NEW",
             "aiAnalysis" to aiSummary,
             "confidence" to (analysis.score * 100).toInt(),
-            "actionTaken" to "Evidence snapshot attached when available."
+            "actionTaken" to if (localLockEligible) {
+                "Evidence bundle attached (raw/normalized explanations + snapshot when available). Local emergency lock may be applied for CRITICAL risk."
+            } else {
+                "Evidence bundle attached (raw/normalized explanations + snapshot when available). Local auto-lock skipped pending stronger confirmation."
+            },
+            "triggerType" to triggerType,
+            "analysisReasonAr" to reasonAr,
+            "analysisReasonEn" to reasonEn,
+            "matchedSignals" to matchedSignals,
+            "triggerRawText" to rawText.take(2000),
+            "triggerNormalizedText" to normalizedText.take(2000),
+            "normalizationChanged" to (rawText.isNotBlank() && normalizedText.isNotBlank() && rawText != normalizedText),
+            "obfuscationLikely" to obfuscationLikely,
+            "evidencePayloadVersion" to "v1",
+            "evidenceMissingFields" to bundleTelemetry.missingFields,
+            "evidenceCoreFieldCount" to EVIDENCE_CORE_FIELDS.size,
+            "evidencePresentFieldCount" to bundleTelemetry.presentFields,
+            "evidenceCompleteness" to bundleTelemetry.completeness,
+            "evidenceHasAllCoreFields" to bundleTelemetry.missingFields.isEmpty(),
+            "evidenceBundleSequence" to bundleTelemetry.sequence,
+            "evidenceUploadStatus" to "QUEUED",
+            "evidenceUploadAttempt" to 0,
+            "evidenceUploadQueuedAt" to Timestamp.now()
         )
         if (!childId.isNullOrBlank()) {
             alert["childId"] = childId
@@ -382,19 +802,117 @@ class ScreenGuardianService : Service() {
                 alert["sourceLocationAt"] = foregroundAt
             }
         }
-        val frame = latestFrameData
+        if (triggerType == "IMAGE") {
+            alert["visualEngineReady"] = SecurityCortex.isVisionEngineReady()
+            val detector = when {
+                matchedSignals.any { it.contains("detector=injury_heuristic", ignoreCase = true) } -> "injury_heuristic"
+                matchedSignals.any { it.contains("detector=violence_scene_model", ignoreCase = true) } -> "violence_scene_model"
+                matchedSignals.any { it.contains("detector=nsfw_model", ignoreCase = true) } -> "nsfw_model"
+                else -> "unknown"
+            }
+            alert["visualDetector"] = detector
+        }
         if (!frame.isNullOrBlank()) {
             alert["imageData"] = frame
         } else {
             alert["captureStatus"] = "NO_FRAME_AVAILABLE"
         }
 
-        FirebaseFirestore.getInstance().collection("alerts").add(alert)
-            .addOnFailureListener { e -> Log.e("ScreenGuardian", "Alert upload failed", e) }
+        val correlationId = "sg-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}"
+        alert["evidenceUploadCorrelationId"] = correlationId
+        uploadAlertPayload(
+            payload = alert,
+            attempt = 1,
+            source = "realtime",
+            correlationId = correlationId
+        )
 
-        if (analysis.severity == "CRITICAL") {
+        if (localLockEligible) {
             activateLocalEmergencyLock(analysis.category)
         }
+    }
+
+    private fun shouldAutoLockLocally(
+        analysis: SecurityCortex.AnalysisResult,
+        triggerType: String
+    ): Boolean {
+        if (analysis.severity != "CRITICAL") return false
+
+        if (triggerType == "IMAGE" && analysis.category == "تحريض على العنف") {
+            val isInjuryHeuristic = analysis.matchedSignals.any {
+                it.contains("detector=injury_heuristic", ignoreCase = true)
+            }
+            if (isInjuryHeuristic) {
+                // Avoid hard-lock on color-heuristic-only visual violence due high false-positive risk.
+                return false
+            }
+        }
+        return true
+    }
+
+    private fun getForegroundPackage(): String {
+        return getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+            .getString("lastForegroundPackage", "")
+            .orEmpty()
+            .trim()
+            .lowercase(Locale.ROOT)
+    }
+
+    private fun isLockOverlayActive(): Boolean {
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        val lockActive = prefs.getBoolean("deviceLockActive", false)
+        val blackoutActive = prefs.getBoolean("blackoutActive", false)
+        return lockActive || blackoutActive
+    }
+
+    private fun resolveSelfThreatIgnoreReason(
+        foregroundPackageRaw: String,
+        ocrText: String?
+    ): String? {
+        val foregroundPackage = foregroundPackageRaw.trim().lowercase(Locale.ROOT)
+        val lockOverlay = isLockOverlayActive()
+
+        if (selfPackagePrefixes.any { prefix -> foregroundPackage.startsWith(prefix) }) {
+            return "self_package"
+        }
+
+        val isLikelySystemUi = systemUiMarkers.any { marker -> foregroundPackage.contains(marker) }
+        if (lockOverlay && (foregroundPackage.isBlank() || isLikelySystemUi)) {
+            return "lock_overlay_context"
+        }
+
+        if (ocrText.isNullOrBlank()) {
+            return null
+        }
+
+        val normalized = SecurityCortex.normalizeTextForAudit(ocrText)
+        val markerHits = selfUiMarkers.count { marker ->
+            normalized.contains(SecurityCortex.normalizeTextForAudit(marker))
+        }
+        val hasAmanahBrand = normalized.contains("amanah") || normalized.contains("امانه")
+
+        if (markerHits >= 2 || (markerHits >= 1 && hasAmanahBrand)) {
+            return "self_ui_marker_match"
+        }
+
+        if (lockOverlay && (markerHits >= 1 || hasAmanahBrand)) {
+            return "lock_overlay_marker_match"
+        }
+
+        if (isLikelySystemUi && hasAmanahBrand) {
+            return "systemui_with_amanah_marker"
+        }
+
+        return null
+    }
+
+    private fun isLikelyObfuscated(rawText: String, normalizedText: String): Boolean {
+        if (rawText.isBlank() || normalizedText.isBlank()) return false
+        val rawCompact = rawText.lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
+        val normalizedCompact = normalizedText.lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
+        val hasMaskingChars = rawText.contains(Regex("[0-9@\\$\\*\\-_\\.]+"))
+        val changed = rawCompact != normalizedCompact
+        return hasMaskingChars || changed
     }
 
     private fun activateLocalEmergencyLock(category: String) {
@@ -441,6 +959,8 @@ class ScreenGuardianService : Service() {
             unregisterReceiver(screenStateReceiver)
         } catch (_: Exception) {
         }
+        controlHandler.removeCallbacks(retryPendingAlertsRunnable)
+        controlHandler.removeCallbacksAndMessages(null)
 
         virtualDisplay?.release()
         mediaProjection?.stop()

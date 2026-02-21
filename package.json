@@ -17,8 +17,12 @@
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write \"**/*.{ts,tsx,json,css,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,css,md}\"",
+    "check:encoding": "node scripts/check-mojibake.mjs components services tests scripts docs android-child",
     "type-check": "tsc --noEmit",
-    "validate": "npm run type-check && npm run lint && npm run test:run"
+    "validate": "npm run type-check && npm run lint && npm run check:encoding && npm run test:run",
+    "release:guard": "npm run validate && npm run quality:gates",
+    "quality:gates": "node scripts/quality-gates.mjs benchmarks/reports/latest-summary.json benchmarks/gates/default-gates.json",
+    "quality:gates:sample": "node scripts/quality-gates.mjs benchmarks/reports/latest-summary.sample.json benchmarks/gates/local-dev-gates.json"
   },
   "dependencies": {
     "@capacitor/android": "^8.1.0",

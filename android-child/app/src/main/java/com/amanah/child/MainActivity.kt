@@ -14,6 +14,9 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.media.RingtoneManager
 import android.media.projection.MediaProjectionManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -28,9 +31,15 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.amanah.child.receivers.AmanahAdminReceiver
+import com.amanah.child.services.AppUsageTrackerService
+import com.amanah.child.services.DeviceHealthReporterService
+import com.amanah.child.services.DnsFilterVpnService
 import com.amanah.child.services.RemoteCommandService
 import com.amanah.child.services.ScreenCaptureSessionStore
 import com.amanah.child.services.ScreenGuardianService
+import com.amanah.child.services.TamperDetectionService
+import com.amanah.child.services.VulnerabilityScannerService
+import com.amanah.child.utils.OfflineUnlockManager
 import com.amanah.child.utils.SecurityCortex
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -45,6 +54,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pairingSection: LinearLayout
     private lateinit var protectedSection: LinearLayout
     private lateinit var lockOverlay: FrameLayout
+    private lateinit var offlineUnlockCodeInput: EditText
+    private lateinit var offlineUnlockButton: Button
+    private lateinit var offlineUnlockStatus: TextView
     private lateinit var btnStartProtection: Button
     
     private val db by lazy { FirebaseFirestore.getInstance() }
@@ -60,6 +72,7 @@ class MainActivity : AppCompatActivity() {
     private val PERMISSION_REQUEST_CODE = 100
     private val SCREEN_CAPTURE_REQUEST_CODE = 200
     private val SCAN_QR_REQUEST_CODE = 300
+    private val DNS_VPN_REQUEST_CODE = 400
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,7 +88,11 @@ class MainActivity : AppCompatActivity() {
             pairingSection = findViewById(R.id.sectionPairing)
             protectedSection = findViewById(R.id.sectionProtected)
             lockOverlay = findViewById(R.id.lockOverlay)
+            offlineUnlockCodeInput = findViewById(R.id.etOfflineUnlockCode)
+            offlineUnlockButton = findViewById(R.id.btnOfflineUnlock)
+            offlineUnlockStatus = findViewById(R.id.tvOfflineUnlockStatus)
             configureLockOverlayBlocking()
+            configureOfflineUnlockUi()
             registerLockStateReceiver()
             syncLockOverlayFromPrefs()
             
@@ -88,6 +105,7 @@ class MainActivity : AppCompatActivity() {
             checkBatteryOptimization()
             checkPairingStatus()
             handleForceLockIntent(intent)
+            handleDnsVpnPermissionIntent(intent)
 
             findViewById<Button>(R.id.btnEnableAccessibility).setOnClickListener {
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -118,6 +136,7 @@ class MainActivity : AppCompatActivity() {
         if (intent != null) {
             setIntent(intent)
             handleForceLockIntent(intent)
+            handleDnsVpnPermissionIntent(intent)
         }
     }
 
@@ -134,8 +153,33 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleForceLockIntent(incomingIntent: Intent) {
         if (incomingIntent.getBooleanExtra("FORCE_LOCK", false)) {
+            // Ensure lock state is persisted so syncLockOverlayFromPrefs won't override
+            getSharedPreferences("AmanahPrefs", MODE_PRIVATE).edit()
+                .putBoolean("deviceLockActive", true)
+                .apply()
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+            } else {
+                @Suppress("DEPRECATION")
+                window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+                @Suppress("DEPRECATION")
+                window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+            }
             updateLockUI(true)
+            // Consume the extra so it doesn't re-fire
+            incomingIntent.removeExtra("FORCE_LOCK")
         }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (lockOverlay.visibility == View.VISIBLE) {
+            // Block back press when device is locked
+            return
+        }
+        super.onBackPressed()
     }
 
     private fun requestScreenCapture() {
@@ -145,6 +189,30 @@ class MainActivity : AppCompatActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == DNS_VPN_REQUEST_CODE) {
+            if (resultCode == Activity.RESULT_OK) {
+                startDnsFilteringService(DnsFilterVpnService.ACTION_APPLY_POLICY)
+                Toast.makeText(this, "DNS filtering activated", Toast.LENGTH_SHORT).show()
+                writeOperationalAlert(
+                    platform = "DNS Filter",
+                    content = "DNS filtering VPN permission granted and protection activated.",
+                    severity = "LOW"
+                )
+            } else {
+                Toast.makeText(
+                    this,
+                    "VPN permission is required for DNS filtering",
+                    Toast.LENGTH_LONG
+                ).show()
+                writeOperationalAlert(
+                    platform = "DNS Filter",
+                    content = "DNS filtering permission request was denied on child device.",
+                    severity = "MEDIUM"
+                )
+            }
+            return
+        }
+
         if (requestCode == SCAN_QR_REQUEST_CODE && resultCode == Activity.RESULT_OK) {
             val result = data?.getStringExtra("SCAN_RESULT")
             if (result != null && result.startsWith("AMANAH_PAIRING:")) {
@@ -156,15 +224,78 @@ class MainActivity : AppCompatActivity() {
         
         if (requestCode == SCREEN_CAPTURE_REQUEST_CODE && resultCode == Activity.RESULT_OK && data != null) {
             ScreenCaptureSessionStore.save(resultCode, data)
-            val pendingStreamMode = getSharedPreferences("AmanahPrefs", MODE_PRIVATE).getBoolean("pendingStreamMode", false)
-            getSharedPreferences("AmanahPrefs", MODE_PRIVATE).edit().putBoolean("pendingStreamMode", false).apply()
+            val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+            val pendingStreamMode = prefs.getBoolean("pendingStreamMode", false)
+            prefs.edit()
+                .putBoolean("pendingStreamMode", false)
+                .putBoolean("visualMonitoringEnabled", true)
+                .apply()
             val serviceIntent = ScreenCaptureSessionStore.buildServiceIntent(this, streamMode = pendingStreamMode)
             if (serviceIntent != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
-                else startService(serviceIntent)
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+                    else startService(serviceIntent)
+                    btnStartProtection.text = "الرقابة البصرية نشطة ✅"
+                    btnStartProtection.isEnabled = false
+                } catch (e: Exception) {
+                    Log.e("AmanahMain", "Failed to start ScreenGuardian: ${e.message}")
+                    Toast.makeText(this, "فشل تشغيل الرقابة البصرية. حاول مرة أخرى.", Toast.LENGTH_LONG).show()
+                    prefs.edit().putBoolean("visualMonitoringEnabled", false).apply()
+                }
             }
-            btnStartProtection.text = "الرقابة البصرية نشطة ✅"
-            btnStartProtection.isEnabled = false
+        } else if (requestCode == SCREEN_CAPTURE_REQUEST_CODE && resultCode != Activity.RESULT_OK) {
+            Toast.makeText(this, "يجب منح إذن التقاط الشاشة لتفعيل الرقابة البصرية", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun handleDnsVpnPermissionIntent(incomingIntent: Intent) {
+        if (!incomingIntent.getBooleanExtra("REQUEST_DNS_VPN_PERMISSION", false)) return
+
+        try {
+            val prepIntent = VpnService.prepare(this)
+            if (prepIntent != null) {
+                startActivityForResult(prepIntent, DNS_VPN_REQUEST_CODE)
+            } else {
+                startDnsFilteringService(DnsFilterVpnService.ACTION_APPLY_POLICY)
+            }
+        } catch (e: Exception) {
+            Log.w("AmanahMain", "Failed to request VPN permission for DNS filtering: ${e.message}")
+        } finally {
+            incomingIntent.removeExtra("REQUEST_DNS_VPN_PERMISSION")
+        }
+    }
+
+    private fun startDnsFilteringService(action: String) {
+        val intent = Intent(this, DnsFilterVpnService::class.java).apply { this.action = action }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != PERMISSION_REQUEST_CODE) return
+
+        val fineGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fineGranted && !coarseGranted) {
+            Toast.makeText(
+                this,
+                "يرجى منح صلاحية الموقع لعرض الموقع الجغرافي الحقيقي للطفل.",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -178,8 +309,12 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     Log.e("AmanahAuth", "Authentication Failed", task.exception)
                     runOnUiThread {
-                        Toast.makeText(this, "فشل تسجيل الدخول التلقائي: ${task.exception?.message}", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "لا يوجد اتصال - الحماية المحلية نشطة", Toast.LENGTH_LONG).show()
                     }
+                    // Retry auth in background (30s) - local monitoring continues without auth
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        ensureFirebaseAuth(onComplete)
+                    }, 30_000L)
                 }
             }
         } else {
@@ -189,8 +324,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkAndRequestPermissions() {
         val permissions = mutableListOf<String>()
+        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val fineGranted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            val backgroundGranted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (fineGranted && !backgroundGranted) {
+                permissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            }
         }
         val neededPermissions = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
@@ -245,6 +395,8 @@ class MainActivity : AppCompatActivity() {
         if (childId != null) {
             pairingSection.visibility = View.GONE
             protectedSection.visibility = View.VISIBLE
+            startLocalMonitoringServices()
+            restoreVisualMonitoringState()
             ensureFirebaseAuth {
                 claimDeviceOwnership(childId)
                 startRemoteCommandService()
@@ -255,10 +407,50 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun restoreVisualMonitoringState() {
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        val wasEnabled = prefs.getBoolean("visualMonitoringEnabled", false)
+        if (wasEnabled) {
+            if (ScreenCaptureSessionStore.hasSession()) {
+                // Session still in memory - restart the service
+                val serviceIntent = ScreenCaptureSessionStore.buildServiceIntent(this, streamMode = false)
+                if (serviceIntent != null) {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+                        else startService(serviceIntent)
+                        btnStartProtection.text = "الرقابة البصرية نشطة ✅"
+                        btnStartProtection.isEnabled = false
+                        return
+                    } catch (e: Exception) {
+                        Log.w("AmanahMain", "Failed to restart ScreenGuardian: ${e.message}")
+                    }
+                }
+            }
+            // Session lost (app was killed) - need to re-request permission
+            btnStartProtection.text = "إعادة تفعيل الرقابة البصرية"
+            btnStartProtection.isEnabled = true
+        }
+    }
+
     private fun startRemoteCommandService() {
         val intent = Intent(this, RemoteCommandService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
         else startService(intent)
+    }
+
+    private fun startLocalMonitoringServices() {
+        try { startService(Intent(this, AppUsageTrackerService::class.java)) } catch (e: Exception) {
+            Log.w("AmanahMain", "AppUsageTracker start failed: ${e.message}")
+        }
+        try { startService(Intent(this, TamperDetectionService::class.java)) } catch (e: Exception) {
+            Log.w("AmanahMain", "TamperDetection start failed: ${e.message}")
+        }
+        try { startService(Intent(this, DeviceHealthReporterService::class.java)) } catch (e: Exception) {
+            Log.w("AmanahMain", "DeviceHealthReporter start failed: ${e.message}")
+        }
+        try { startService(Intent(this, VulnerabilityScannerService::class.java)) } catch (e: Exception) {
+            Log.w("AmanahMain", "VulnerabilityScanner start failed: ${e.message}")
+        }
     }
 
     private fun claimDeviceOwnership(childId: String) {
@@ -525,8 +717,15 @@ class MainActivity : AppCompatActivity() {
                 val blockAppCmd = commands["blockApp"] as? Map<*, *>
                 if (shouldHandleCommand(blockAppCmd, "blockApp")) {
                     val cfg = blockAppCmd?.get("value") as? Map<*, *>
-                    handleBlockAppCommand(cfg)
-                    markCommandStatus(childId, "blockApp", "EXECUTED")
+                    val applied = handleBlockAppCommand(cfg)
+                    markCommandStatus(childId, "blockApp", if (applied) "EXECUTED" else "FAILED")
+                    if (!applied) {
+                        writeOperationalAlert(
+                            platform = "Remote Command",
+                            content = "blockApp command received but no target package could be resolved.",
+                            severity = "LOW"
+                        )
+                    }
                 }
 
                 val cutInternetCmd = commands["cutInternet"] as? Map<*, *>
@@ -552,6 +751,31 @@ class MainActivity : AppCompatActivity() {
                         severity = "LOW"
                     )
                     markCommandStatus(childId, "blockCameraAndMic", "ACKNOWLEDGED", clearValue = true)
+                }
+
+                val offlineUnlockCmd = commands["syncOfflineUnlockConfig"] as? Map<*, *>
+                if (shouldHandleCommand(offlineUnlockCmd, "syncOfflineUnlockConfig")) {
+                    val applied = OfflineUnlockManager.applyConfig(this, offlineUnlockCmd?.get("value"))
+                    markCommandStatus(
+                        childId,
+                        "syncOfflineUnlockConfig",
+                        if (applied) "EXECUTED" else "FAILED",
+                        clearValue = applied
+                    )
+                }
+
+                val vulnerabilityScanCmd = commands["runVulnerabilityScan"] as? Map<*, *>
+                if (shouldHandleCommand(vulnerabilityScanCmd, "runVulnerabilityScan")) {
+                    try {
+                        startService(
+                            Intent(this, VulnerabilityScannerService::class.java).apply {
+                                action = VulnerabilityScannerService.ACTION_SCAN_NOW
+                            }
+                        )
+                        markCommandStatus(childId, "runVulnerabilityScan", "EXECUTED", clearValue = true)
+                    } catch (_: Exception) {
+                        markCommandStatus(childId, "runVulnerabilityScan", "FAILED")
+                    }
                 }
 
                 val notifyParentCmd = commands["notifyParent"] as? Map<*, *>
@@ -650,18 +874,74 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    private fun handleBlockAppCommand(config: Map<*, *>?) {
-        if (config == null) return
-        val blocked = config["blocked"] as? Boolean ?: false
+    private fun handleBlockAppCommand(config: Map<*, *>?): Boolean {
+        if (config == null) return false
+        val blocked = when (val flag = config["blocked"] ?: config["isBlocked"]) {
+            is Boolean -> flag
+            is String -> flag.equals("true", ignoreCase = true)
+            else -> false
+        }
         val appIdRaw = config["appId"]?.toString()?.trim()?.lowercase(Locale.getDefault()) ?: ""
         val appNameRaw = config["appName"]?.toString()?.trim()?.lowercase(Locale.getDefault()) ?: ""
-        val token = if (appIdRaw.isNotEmpty()) appIdRaw else appNameRaw
-        if (token.isEmpty()) return
+        val tokens = resolveBlockedTokens(appIdRaw, appNameRaw)
+        if (tokens.isEmpty()) return false
 
         val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
         val currentSet = prefs.getStringSet("blockedApps", emptySet())?.toMutableSet() ?: mutableSetOf()
-        if (blocked) currentSet.add(token) else currentSet.remove(token)
+        if (blocked) currentSet.addAll(tokens) else currentSet.removeAll(tokens)
         prefs.edit().putStringSet("blockedApps", currentSet).apply()
+        return true
+    }
+
+    private fun resolveBlockedTokens(appIdRaw: String, appNameRaw: String): Set<String> {
+        val aliases = mapOf(
+            "tiktok" to "com.zhiliaoapp.musically",
+            "tik tok" to "com.zhiliaoapp.musically",
+            "instagram" to "com.instagram.android",
+            "youtube" to "com.google.android.youtube",
+            "whatsapp" to "com.whatsapp",
+            "telegram" to "org.telegram.messenger",
+            "discord" to "com.discord",
+            "snapchat" to "com.snapchat.android",
+            "facebook" to "com.facebook.katana",
+            "roblox" to "com.roblox.client"
+        )
+        val tokens = mutableSetOf<String>()
+        if (appIdRaw.isNotBlank()) tokens.add(appIdRaw)
+        if (appNameRaw.isNotBlank()) tokens.add(appNameRaw)
+        aliases[appIdRaw]?.let { tokens.add(it) }
+        aliases[appNameRaw]?.let { tokens.add(it) }
+
+        resolvePackageFromInstalledApps(appNameRaw)?.let { tokens.add(it) }
+        if (!appIdRaw.contains('.')) {
+            resolvePackageFromInstalledApps(appIdRaw)?.let { tokens.add(it) }
+        }
+        return tokens.map { it.trim().lowercase(Locale.getDefault()) }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+
+    private fun resolvePackageFromInstalledApps(rawName: String): String? {
+        val normalized = rawName.trim().lowercase(Locale.getDefault())
+        if (normalized.isBlank()) return null
+        if (normalized.contains('.')) return normalized
+        return try {
+            packageManager.getInstalledApplications(0)
+                .firstOrNull { app ->
+                    val label = try {
+                        packageManager.getApplicationLabel(app).toString()
+                            .trim()
+                            .lowercase(Locale.getDefault())
+                    } catch (_: Exception) {
+                        ""
+                    }
+                    label == normalized || label.contains(normalized)
+                }
+                ?.packageName
+                ?.lowercase(Locale.getDefault())
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun playShortBeep() {
@@ -748,12 +1028,100 @@ class MainActivity : AppCompatActivity() {
         lockOverlay.setOnTouchListener { _, _ -> lockOverlay.visibility == View.VISIBLE }
     }
 
+    private fun configureOfflineUnlockUi() {
+        offlineUnlockButton.setOnClickListener {
+            attemptOfflineUnlock("main_activity")
+        }
+        offlineUnlockCodeInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE ||
+                actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO
+            ) {
+                attemptOfflineUnlock("main_activity")
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    private fun attemptOfflineUnlock(source: String) {
+        if (lockOverlay.visibility != View.VISIBLE) return
+        if (isDeviceOnline()) {
+            offlineUnlockStatus.visibility = View.GONE
+            offlineUnlockCodeInput.setText("")
+            return
+        }
+        val code = offlineUnlockCodeInput.text?.toString().orEmpty()
+        val result = OfflineUnlockManager.verifyCode(this, code)
+        if (!result.success) {
+            offlineUnlockStatus.setTextColor(Color.parseColor("#FCA5A5"))
+            offlineUnlockStatus.text = result.message
+            return
+        }
+
+        OfflineUnlockManager.clearLockState(this, source)
+        broadcastLockStateChanged()
+        updateLockUI(false)
+        offlineUnlockCodeInput.setText("")
+        offlineUnlockStatus.setTextColor(Color.parseColor("#86EFAC"))
+        offlineUnlockStatus.text = result.message
+
+        val childId = getSharedPreferences("AmanahPrefs", MODE_PRIVATE).getString("childDocumentId", null)
+        if (!childId.isNullOrBlank()) {
+            markCommandStatus(childId, "lockDevice", "OFFLINE_UNLOCKED", clearValue = true)
+            markCommandStatus(childId, "lockscreenBlackout", "OFFLINE_UNLOCKED", clearValue = true)
+        }
+    }
+
     private fun updateLockUI(isLocked: Boolean) {
         runOnUiThread {
             lockOverlay.visibility = if (isLocked) View.VISIBLE else View.GONE
-            statusText.text = if (isLocked) "الجهاز مقفل" else "الحماية نشطة"
+            statusText.text = if (isLocked) "Device is locked" else "Protection active"
             statusText.setTextColor(if (isLocked) Color.RED else Color.GREEN)
+
+            if (!isLocked) {
+                offlineUnlockCodeInput.visibility = View.GONE
+                offlineUnlockButton.visibility = View.GONE
+                offlineUnlockStatus.visibility = View.GONE
+                offlineUnlockCodeInput.setText("")
+                offlineUnlockStatus.text = ""
+                return@runOnUiThread
+            }
+
+            val online = isDeviceOnline()
+            if (online) {
+                // Online lock screen uses the classic policy-only view with no offline unlock controls.
+                offlineUnlockCodeInput.visibility = View.GONE
+                offlineUnlockButton.visibility = View.GONE
+                offlineUnlockStatus.visibility = View.GONE
+                offlineUnlockCodeInput.setText("")
+                offlineUnlockStatus.text = ""
+            } else {
+                offlineUnlockCodeInput.visibility = View.VISIBLE
+                offlineUnlockButton.visibility = View.VISIBLE
+                offlineUnlockStatus.visibility = View.VISIBLE
+
+                val backupRemaining = OfflineUnlockManager.backupCodesRemaining(this)
+                if (backupRemaining > 0) {
+                    offlineUnlockStatus.setTextColor(Color.parseColor("#F8DFA9"))
+                    offlineUnlockStatus.text = "Emergency backup codes remaining: $backupRemaining"
+                } else {
+                    offlineUnlockStatus.text = ""
+                }
+            }
+
+            // Ensure overlay intercepts all touch events when locked
+            lockOverlay.bringToFront()
+            lockOverlay.requestFocus()
         }
+    }
+
+    private fun isDeviceOnline(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 }
 

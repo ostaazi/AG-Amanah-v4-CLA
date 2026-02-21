@@ -14,7 +14,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { AlertSeverity, Category } from '../types';
-import { canUseMockData, db } from './firebaseConfig';
+import { auth, canUseMockData, db } from './firebaseConfig';
 
 export type MockDataDomain =
   | 'children'
@@ -35,12 +35,56 @@ export const MOCK_DATA_DOMAINS: MockDataDomain[] = [
   'operations',
 ];
 
+export type MockDataVerificationReport = {
+  counts: Record<MockDataDomain, number>;
+  total: number;
+  clean: boolean;
+  inaccessible: MockDataDomain[];
+  checkedAt: string;
+};
+
 const MOCK_TAG = 'AMANAH_FAKE_DATA';
+const mockDataNoticeCache = new Set<string>();
+
+const buildEmptyDomainCounts = (): Record<MockDataDomain, number> => ({
+  children: 0,
+  devices: 0,
+  eventsAlerts: 0,
+  timings: 0,
+  supervisors: 0,
+  psychPulse: 0,
+  operations: 0,
+});
+
+const isMockRecord = (data: any): boolean => {
+  if (!data || typeof data !== 'object') return false;
+  return data.mockTag === MOCK_TAG || data.isMock === true;
+};
+
+const logMockDataNoticeOnce = (key: string, message: string) => {
+  if (mockDataNoticeCache.has(key)) return;
+  mockDataNoticeCache.add(key);
+  console.info(`[MockData] ${message}`);
+};
 
 const ensureMockOpsAllowed = (context: string) => {
   if (canUseMockData()) return;
-  console.warn(`[MockData] ${context}: blocked because emulator is not enabled.`);
+  logMockDataNoticeOnce(`mock-disabled:${context}`, `${context}: blocked because mock operations are disabled.`);
   throw new Error('MOCK_DATA_DISABLED');
+};
+
+const resolveMockOwnerId = (requestedParentId: string): string => {
+  const requested = String(requestedParentId || '').trim();
+  const authUid = String(auth?.currentUser?.uid || '').trim();
+  if (!authUid) return requested;
+
+  if (requested && requested !== authUid) {
+    logMockDataNoticeOnce(
+      `mock-owner-remap:${requested}:${authUid}`,
+      `mock scope remapped to auth uid (${authUid}).`
+    );
+  }
+  return authUid;
 };
 
 const isPermissionDeniedError = (error: any): boolean => {
@@ -72,7 +116,10 @@ const runMutationBatch = async (
     }
 
     if (isPermissionDeniedError(result.reason)) {
-      console.warn(`[MockData] ${context}: skipped one mutation due to permission-denied.`);
+      logMockDataNoticeOnce(
+        `mutation-permission-denied:${context}`,
+        `${context}: skipped one mutation due to permission-denied.`
+      );
       continue;
     }
 
@@ -91,7 +138,10 @@ const safeGetDocs = async (queryRef: any, context: string) => {
     return await getDocs(queryRef);
   } catch (error) {
     if (isPermissionDeniedError(error)) {
-      console.warn(`[MockData] ${context}: skipped read due to permission-denied.`);
+      logMockDataNoticeOnce(
+        `read-permission-denied:${context}`,
+        `${context}: skipped read due to permission-denied.`
+      );
       return { docs: [] } as any;
     }
     throw error;
@@ -103,8 +153,49 @@ const safeGetDoc = async (docRef: any, context: string) => {
     return await getDoc(docRef);
   } catch (error) {
     if (isPermissionDeniedError(error)) {
-      console.warn(`[MockData] ${context}: skipped read due to permission-denied.`);
+      logMockDataNoticeOnce(
+        `read-permission-denied:${context}`,
+        `${context}: skipped read due to permission-denied.`
+      );
       return { exists: () => false, data: () => undefined } as any;
+    }
+    throw error;
+  }
+};
+
+const safeGetDocsWithStatus = async (
+  queryRef: any,
+  context: string
+): Promise<{ docs: any[]; denied: boolean }> => {
+  try {
+    const snap = await getDocs(queryRef);
+    return { docs: snap.docs || [], denied: false };
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      logMockDataNoticeOnce(
+        `read-permission-denied:${context}`,
+        `${context}: skipped read due to permission-denied.`
+      );
+      return { docs: [], denied: true };
+    }
+    throw error;
+  }
+};
+
+const safeGetDocWithStatus = async (
+  docRef: any,
+  context: string
+): Promise<{ exists: boolean; data: any; denied: boolean }> => {
+  try {
+    const snap = await getDoc(docRef);
+    return { exists: snap.exists(), data: snap.data?.(), denied: false };
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      logMockDataNoticeOnce(
+        `read-permission-denied:${context}`,
+        `${context}: skipped read due to permission-denied.`
+      );
+      return { exists: false, data: undefined, denied: true };
     }
     throw error;
   }
@@ -415,7 +506,8 @@ export const injectSelectedMockData = async (
   parentId: string,
   domains: MockDataDomain[]
 ): Promise<Record<MockDataDomain, number>> => {
-  if (!db || !parentId) {
+  const ownerId = resolveMockOwnerId(parentId);
+  if (!db || !ownerId) {
     return {
       children: 0,
       devices: 0,
@@ -439,18 +531,18 @@ export const injectSelectedMockData = async (
     operations: 0,
   };
 
-  let mockChildren = (await ensureMockChildren(parentId, selected.has('children') ? 2 : 0)).docs;
+  let mockChildren = (await ensureMockChildren(ownerId, selected.has('children') ? 2 : 0)).docs;
   result.children = selected.has('children') ? 0 : 0;
 
   if (selected.has('children')) {
-    const ensure = await ensureMockChildren(parentId, 2);
+    const ensure = await ensureMockChildren(ownerId, 2);
     mockChildren = ensure.docs;
     result.children = ensure.created;
   }
 
   const needsChildren = selected.has('devices') || selected.has('timings') || selected.has('psychPulse') || selected.has('eventsAlerts');
   if (needsChildren && mockChildren.length === 0) {
-    const ensure = await ensureMockChildren(parentId, 1);
+    const ensure = await ensureMockChildren(ownerId, 1);
     mockChildren = ensure.docs;
     result.children += ensure.created;
   }
@@ -499,7 +591,7 @@ export const injectSelectedMockData = async (
     for (const childDoc of mockChildren) {
       const childName = String(childDoc.data()?.name || 'Mock Child');
       await addDoc(collection(db, 'alerts'), {
-        parentId,
+        parentId: ownerId,
         childName,
         platform: 'Instagram',
         content: 'Mock: potential bullying language detected in direct message.',
@@ -514,7 +606,7 @@ export const injectSelectedMockData = async (
       createdAlerts++;
 
       await addDoc(collection(db, 'alerts'), {
-        parentId,
+        parentId: ownerId,
         childName,
         platform: 'Discord',
         content: 'Mock: direct threat intent detected.',
@@ -530,7 +622,7 @@ export const injectSelectedMockData = async (
     }
 
     await addDoc(collection(db, 'activities'), {
-      parentId,
+      parentId: ownerId,
       action: 'Mock Activity',
       details: 'Injected demo alerts/events package',
       type: 'SUCCESS',
@@ -540,7 +632,7 @@ export const injectSelectedMockData = async (
     });
 
     await addDoc(collection(db, 'activities'), {
-      parentId,
+      parentId: ownerId,
       action: 'Mock Sync',
       details: 'Device heartbeat timings randomized for test run',
       type: 'INFO',
@@ -553,12 +645,12 @@ export const injectSelectedMockData = async (
   }
 
   if (selected.has('supervisors')) {
-    const ensure = await ensureMockSupervisors(parentId, 2);
+    const ensure = await ensureMockSupervisors(ownerId, 2);
     result.supervisors = ensure.created;
   }
 
   if (selected.has('operations')) {
-    const advanced = await injectAdvancedOperationalMockData(parentId);
+    const advanced = await injectAdvancedOperationalMockData(ownerId);
     result.operations = advanced.playbooks + advanced.custody + advanced.auditLogs;
   }
 
@@ -569,7 +661,8 @@ export const clearSelectedMockData = async (
   parentId: string,
   domains: MockDataDomain[]
 ): Promise<Record<MockDataDomain, number>> => {
-  if (!db || !parentId) {
+  const ownerId = resolveMockOwnerId(parentId);
+  if (!db || !ownerId) {
     return {
       children: 0,
       devices: 0,
@@ -580,6 +673,7 @@ export const clearSelectedMockData = async (
       operations: 0,
     };
   }
+  ensureMockOpsAllowed('clear mock data');
 
   const selected = new Set(domains);
   const result: Record<MockDataDomain, number> = {
@@ -592,7 +686,7 @@ export const clearSelectedMockData = async (
     operations: 0,
   };
 
-  const childrenSnap = await listChildrenByParent(parentId);
+  const childrenSnap = await listChildrenByParent(ownerId);
   const mockChildren = childrenSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
 
   if (selected.has('children')) {
@@ -645,14 +739,14 @@ export const clearSelectedMockData = async (
   }
 
   if (selected.has('eventsAlerts')) {
-    const alertsSnap = await listAlertsByParent(parentId);
+    const alertsSnap = await listAlertsByParent(ownerId);
     const mockAlerts = alertsSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
     const removedAlerts = await runMutationBatch(
       mockAlerts.map((d: any) => () => deleteDoc(doc(db, 'alerts', d.id))),
       'clear mock alerts'
     );
 
-    const activitiesSnap = await listActivitiesByParent(parentId);
+    const activitiesSnap = await listActivitiesByParent(ownerId);
     const mockActivities = activitiesSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
     const removedActivities = await runMutationBatch(
       mockActivities.map((d: any) => () => deleteDoc(doc(db, 'activities', d.id))),
@@ -663,7 +757,7 @@ export const clearSelectedMockData = async (
   }
 
   if (selected.has('supervisors')) {
-    const supervisorsSnap = await listSupervisorsByParent(parentId);
+    const supervisorsSnap = await listSupervisorsByParent(ownerId);
     const mockSup = supervisorsSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
     result.supervisors = await runMutationBatch(
       mockSup.map((d: any) => () => deleteDoc(doc(db, 'supervisors', d.id))),
@@ -674,7 +768,7 @@ export const clearSelectedMockData = async (
   if (selected.has('operations')) {
     let removed = 0;
 
-    const playbookRef = doc(db, 'playbooks', parentId);
+    const playbookRef = doc(db, 'playbooks', ownerId);
     const playbookSnap = await safeGetDoc(playbookRef, 'read mock playbook');
     if (playbookSnap.exists() && playbookSnap.data()?.mockTag === MOCK_TAG) {
       try {
@@ -686,14 +780,17 @@ export const clearSelectedMockData = async (
         removed += 1;
       } catch (error) {
         if (isPermissionDeniedError(error)) {
-          console.warn('[MockData] clear playbook mock payload skipped due to permission-denied.');
+          logMockDataNoticeOnce(
+            'mutation-permission-denied:clear-playbook',
+            'clear playbook mock payload skipped due to permission-denied.'
+          );
         } else {
           throw error;
         }
       }
     }
 
-    const custodyQ = query(collection(db, 'custody'), where('parentId', '==', parentId));
+    const custodyQ = query(collection(db, 'custody'), where('parentId', '==', ownerId));
     const custodySnap = await safeGetDocs(custodyQ, 'list mock custody');
     const mockCustody = custodySnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
     removed += await runMutationBatch(
@@ -701,7 +798,7 @@ export const clearSelectedMockData = async (
       'clear mock custody'
     );
 
-    const auditQ = query(collection(db, 'auditLogs'), where('parentId', '==', parentId));
+    const auditQ = query(collection(db, 'auditLogs'), where('parentId', '==', ownerId));
     const auditSnap = await safeGetDocs(auditQ, 'list mock audit logs');
     const mockAudit = auditSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
     removed += await runMutationBatch(
@@ -713,6 +810,125 @@ export const clearSelectedMockData = async (
   }
 
   return result;
+};
+
+export const verifyMockDataCleanup = async (
+  parentId: string,
+  domains: MockDataDomain[] = [...MOCK_DATA_DOMAINS]
+): Promise<MockDataVerificationReport> => {
+  const ownerId = resolveMockOwnerId(parentId);
+  const counts = buildEmptyDomainCounts();
+  const selected = new Set(domains);
+  const inaccessible = new Set<MockDataDomain>();
+
+  if (!db || !ownerId) {
+    return {
+      counts,
+      total: 0,
+      clean: true,
+      inaccessible: [],
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  const markInaccessible = (domain: MockDataDomain) => {
+    if (selected.has(domain)) inaccessible.add(domain);
+  };
+
+  const needsChildRead =
+    selected.has('children') ||
+    selected.has('devices') ||
+    selected.has('timings') ||
+    selected.has('psychPulse');
+
+  if (needsChildRead) {
+    const childQ = query(collection(db, 'children'), where('parentId', '==', ownerId));
+    const childrenSnap = await safeGetDocsWithStatus(childQ, 'verify mock children');
+    if (childrenSnap.denied) {
+      markInaccessible('children');
+      markInaccessible('devices');
+      markInaccessible('timings');
+      markInaccessible('psychPulse');
+    } else {
+      const mockChildren = childrenSnap.docs.filter((d: any) => isMockRecord(d.data?.()));
+      if (selected.has('children')) counts.children = mockChildren.length;
+      if (selected.has('devices')) counts.devices = mockChildren.length;
+      if (selected.has('timings')) counts.timings = mockChildren.length;
+      if (selected.has('psychPulse')) counts.psychPulse = mockChildren.length;
+    }
+  }
+
+  if (selected.has('eventsAlerts')) {
+    const alertsQ = query(collection(db, 'alerts'), where('parentId', '==', ownerId));
+    const alertsSnap = await safeGetDocsWithStatus(alertsQ, 'verify mock alerts');
+
+    const activitiesQ = query(collection(db, 'activities'), where('parentId', '==', ownerId));
+    const activitiesSnap = await safeGetDocsWithStatus(activitiesQ, 'verify mock activities');
+
+    if (alertsSnap.denied || activitiesSnap.denied) {
+      markInaccessible('eventsAlerts');
+    } else {
+      const mockAlerts = alertsSnap.docs.filter((d: any) => isMockRecord(d.data?.())).length;
+      const mockActivities = activitiesSnap.docs.filter((d: any) => isMockRecord(d.data?.())).length;
+      counts.eventsAlerts = mockAlerts + mockActivities;
+    }
+  }
+
+  if (selected.has('supervisors')) {
+    const supervisorsQ = query(collection(db, 'supervisors'), where('parentId', '==', ownerId));
+    const supervisorsSnap = await safeGetDocsWithStatus(supervisorsQ, 'verify mock supervisors');
+    if (supervisorsSnap.denied) {
+      markInaccessible('supervisors');
+    } else {
+      counts.supervisors = supervisorsSnap.docs.filter((d: any) => isMockRecord(d.data?.())).length;
+    }
+  }
+
+  if (selected.has('operations')) {
+    let operationsDenied = false;
+    let operationsCount = 0;
+
+    const playbookRef = doc(db, 'playbooks', ownerId);
+    const playbookSnap = await safeGetDocWithStatus(playbookRef, 'verify mock playbook');
+    if (playbookSnap.denied) {
+      operationsDenied = true;
+    } else if (playbookSnap.exists && isMockRecord(playbookSnap.data)) {
+      operationsCount += 1;
+    }
+
+    const custodyQ = query(collection(db, 'custody'), where('parentId', '==', ownerId));
+    const custodySnap = await safeGetDocsWithStatus(custodyQ, 'verify mock custody');
+    if (custodySnap.denied) {
+      operationsDenied = true;
+    } else {
+      operationsCount += custodySnap.docs.filter((d: any) => isMockRecord(d.data?.())).length;
+    }
+
+    const auditQ = query(collection(db, 'auditLogs'), where('parentId', '==', ownerId));
+    const auditSnap = await safeGetDocsWithStatus(auditQ, 'verify mock audit logs');
+    if (auditSnap.denied) {
+      operationsDenied = true;
+    } else {
+      operationsCount += auditSnap.docs.filter((d: any) => isMockRecord(d.data?.())).length;
+    }
+
+    if (operationsDenied) {
+      markInaccessible('operations');
+    } else {
+      counts.operations = operationsCount;
+    }
+  }
+
+  const total = Object.values(counts).reduce((acc, n) => acc + n, 0);
+  const inaccessibleDomains = Array.from(inaccessible);
+
+  return {
+    counts,
+    total,
+    clean: total === 0 && inaccessibleDomains.length === 0,
+    inaccessible: inaccessibleDomains,
+    checkedAt: new Date().toISOString(),
+  };
 };
 
 /**
@@ -735,8 +951,9 @@ export const clearAllUserData = async (_parentId: string) => {
  */
 export const randomizePsychProfiles = async (parentId: string) => {
   ensureMockOpsAllowed('randomize psych profiles');
-  if (!db) return;
-  const q = query(collection(db, 'children'), where('parentId', '==', parentId));
+  const ownerId = resolveMockOwnerId(parentId);
+  if (!db || !ownerId) return;
+  const q = query(collection(db, 'children'), where('parentId', '==', ownerId));
   const snap = await getDocs(q);
   await Promise.all(
     snap.docs.map((d) =>
@@ -757,11 +974,12 @@ export const injectAdvancedOperationalMockData = async (parentId: string): Promi
   auditLogs: number;
 }> => {
   ensureMockOpsAllowed('inject advanced operational mock data');
-  if (!db || !parentId) return { playbooks: 0, custody: 0, auditLogs: 0 };
+  const ownerId = resolveMockOwnerId(parentId);
+  if (!db || !ownerId) return { playbooks: 0, custody: 0, auditLogs: 0 };
 
-  const playbookDocRef = doc(db, 'playbooks', parentId);
+  const playbookDocRef = doc(db, 'playbooks', ownerId);
   await updateDoc(playbookDocRef, {
-    parentId,
+    parentId: ownerId,
     mockTag: MOCK_TAG,
     updatedAt: Timestamp.now(),
     playbooks: [
@@ -792,7 +1010,7 @@ export const injectAdvancedOperationalMockData = async (parentId: string): Promi
     ],
   }).catch(async () => {
     await setDoc(playbookDocRef, {
-      parentId,
+      parentId: ownerId,
       mockTag: MOCK_TAG,
       updatedAt: Timestamp.now(),
       playbooks: [
@@ -813,7 +1031,7 @@ export const injectAdvancedOperationalMockData = async (parentId: string): Promi
   });
 
   const custodyRef = await addDoc(collection(db, 'custody'), {
-    parentId,
+    parentId: ownerId,
     mockTag: MOCK_TAG,
     incident_id: 'mock-incident-1',
     evidence_id: 'mock-evidence-1',
@@ -827,7 +1045,7 @@ export const injectAdvancedOperationalMockData = async (parentId: string): Promi
   });
 
   const auditRef = await addDoc(collection(db, 'auditLogs'), {
-    parentId,
+    parentId: ownerId,
     mockTag: MOCK_TAG,
     command_id: 'mock-cmd-1',
     child_id: 'mock-child-1',

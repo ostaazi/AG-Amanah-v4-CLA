@@ -4,6 +4,7 @@ import { ICONS } from '../constants';
 import { translations } from '../translations';
 import { sendRemoteCommand, subscribeToAlerts } from '../services/firestoreService';
 import { shouldBlockLockActivation } from '../services/lockCommandPolicy';
+import { formatDateTimeDefault, formatTimeDefault } from '../services/dateTimeFormat';
 
 type VideoSource = 'camera_front' | 'camera_back' | 'screen';
 type AudioSource = 'mic' | 'system';
@@ -518,10 +519,10 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
             {lang === 'ar'
               ? lockDisableMode === 'permanent'
                 ? 'تم تعطيل جميع الأقفال بشكل دائم من الإعدادات.'
-                : `تم تعطيل جميع الأقفال مؤقتًا${lockDisableUntilTs ? ` حتى ${new Date(lockDisableUntilTs).toLocaleString('ar-EG')}` : ''}.`
+                : `تم تعطيل جميع الأقفال مؤقتًا${lockDisableUntilTs ? ` حتى ${formatDateTimeDefault(lockDisableUntilTs, { includeSeconds: false })}` : ''}.`
               : lockDisableMode === 'permanent'
                 ? 'All locks are disabled permanently from settings.'
-                : `All locks are disabled temporarily${lockDisableUntilTs ? ` until ${new Date(lockDisableUntilTs).toLocaleString('en-US')}` : ''}.`}
+                : `All locks are disabled temporarily${lockDisableUntilTs ? ` until ${formatDateTimeDefault(lockDisableUntilTs, { includeSeconds: false })}` : ''}.`}
           </div>
         )}
 
@@ -692,7 +693,7 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
                       {toneLabel(entry.tone, t)}
                     </span>
                     <span className="text-[10px] text-slate-400 font-mono">
-                      {entry.timestamp.toLocaleTimeString()}
+                      {formatTimeDefault(entry.timestamp, { includeSeconds: true })}
                     </span>
                   </div>
                   <p className="text-xs font-bold text-slate-700 leading-relaxed">{entry.text}</p>

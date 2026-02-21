@@ -1,4 +1,4 @@
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+﻿<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
@@ -11,34 +11,36 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
             android:gravity="center_horizontal"
-            android:padding="32dp">
+            android:orientation="vertical"
+            android:padding="28dp">
 
             <ImageView
                 android:id="@+id/ivShield"
-                android:layout_width="140dp"
-                android:layout_height="140dp"
-                android:layout_marginTop="40dp"
+                android:layout_width="168dp"
+                android:layout_height="168dp"
+                android:layout_marginTop="24dp"
+                android:adjustViewBounds="true"
+                android:contentDescription="Amanah Shield"
                 android:src="@drawable/ic_shield_logo" />
 
             <TextView
                 android:id="@+id/tvAmanahTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
                 android:text="Amanah"
-                android:textColor="#8A1538"
-                android:textSize="28sp"
-                android:textStyle="bold"
-                android:layout_marginTop="8dp" />
+                android:textColor="#D1A23D"
+                android:textSize="30sp"
+                android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/tvStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="انتظار الإقتران..."
-                android:textColor="#D1A23D"
+                android:layout_marginTop="14dp"
+                android:text="Waiting for pairing..."
+                android:textColor="#F7DE8D"
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
@@ -46,19 +48,19 @@
                 android:id="@+id/sectionPairing"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="36dp"
                 android:orientation="vertical"
-                android:layout_marginTop="40dp"
-                android:padding="24dp">
+                android:padding="16dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="مفتاح الربط"
-                    android:textColor="#D1A23D"
+                    android:layout_gravity="end"
+                    android:layout_marginBottom="14dp"
+                    android:text="Pairing Key"
+                    android:textColor="#F7DE8D"
                     android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:layout_gravity="right"
-                    android:layout_marginBottom="16dp" />
+                    android:textStyle="bold" />
 
                 <RelativeLayout
                     android:layout_width="match_parent"
@@ -69,17 +71,17 @@
                         android:layout_width="match_parent"
                         android:layout_height="64dp"
                         android:background="@drawable/bg_input"
+                        android:fontFamily="monospace"
                         android:gravity="center"
                         android:hint="000000"
-                        android:textColor="#D1A23D"
-                        android:textColorHint="#1e293b"
-                        android:textAllCaps="true"
-                        android:textSize="32sp"
-                        android:fontFamily="monospace"
-                        android:textStyle="bold"
-                        android:paddingEnd="64dp"
                         android:inputType="number"
-                        android:maxLength="6" />
+                        android:maxLength="6"
+                        android:paddingEnd="64dp"
+                        android:textAllCaps="true"
+                        android:textColor="#D1A23D"
+                        android:textColorHint="#64748B"
+                        android:textSize="32sp"
+                        android:textStyle="bold" />
 
                     <ImageButton
                         android:id="@+id/btnScanQR"
@@ -89,18 +91,18 @@
                         android:layout_centerVertical="true"
                         android:layout_marginEnd="8dp"
                         android:background="?attr/selectableItemBackgroundBorderless"
-                        android:src="@android:drawable/ic_menu_camera"
                         android:contentDescription="Scan QR"
-                        android:tint="#D1A23D" />
+                        android:src="@android:drawable/ic_menu_camera"
+                        android:tint="#F7DE8D" />
                 </RelativeLayout>
 
                 <Button
                     android:id="@+id/btnSubmitPairing"
                     android:layout_width="match_parent"
                     android:layout_height="64dp"
-                    android:layout_marginTop="32dp"
+                    android:layout_marginTop="24dp"
                     android:backgroundTint="#D1A23D"
-                    android:text="تأكيد الربط"
+                    android:text="Confirm Pairing"
                     android:textColor="#050510"
                     android:textSize="18sp"
                     android:textStyle="bold" />
@@ -110,49 +112,48 @@
                 android:id="@+id/sectionProtected"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="36dp"
                 android:orientation="vertical"
-                android:layout_marginTop="40dp"
                 android:visibility="gone">
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="جهازك محمي بواسطة Amanah AI. كافة الرسائل والوسائط تخضع للفحص الاستباقي لضمان سلامتك."
-                    android:textColor="#94a3b8"
+                    android:layout_marginBottom="24dp"
                     android:gravity="center"
-                    android:textSize="14sp"
-                    android:layout_marginBottom="32dp"
-                    android:padding="8dp" />
+                    android:padding="8dp"
+                    android:text="Your device is protected by Amanah AI. Monitoring remains active to detect risky content early."
+                    android:textColor="#C8CBD2"
+                    android:textSize="14sp" />
 
                 <Button
                     android:id="@+id/btnStartProtection"
                     android:layout_width="match_parent"
                     android:layout_height="64dp"
+                    android:layout_marginBottom="14dp"
                     android:backgroundTint="#D1A23D"
-                    android:text="تفعيل الرقابة البصرية"
+                    android:text="Enable Visual Monitoring"
                     android:textColor="#050510"
                     android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="16dp" />
+                    android:textStyle="bold" />
 
                 <Button
                     android:id="@+id/btnEnableAccessibility"
                     android:layout_width="match_parent"
                     android:layout_height="64dp"
-                    android:backgroundTint="#1e293b"
-                    android:text="تحديث صلاحيات الرصد"
+                    android:backgroundTint="#1E293B"
+                    android:text="Update Accessibility Permissions"
                     android:textColor="#FFFFFF" />
             </LinearLayout>
 
         </LinearLayout>
     </ScrollView>
 
-    <!-- واجهة القفل الفوري المضافة -->
     <FrameLayout
         android:id="@+id/lockOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#FF000000"
+        android:background="#E6000000"
         android:clickable="true"
         android:focusable="true"
         android:visibility="gone">
@@ -161,30 +162,75 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
+            android:layout_marginHorizontal="24dp"
+            android:background="@drawable/bg_lock_overlay_card"
             android:gravity="center"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:padding="28dp">
 
             <ImageView
-                android:layout_width="120dp"
-                android:layout_height="120dp"
-                android:src="@drawable/ic_shield_logo"
-                android:alpha="0.4" />
+                android:layout_width="132dp"
+                android:layout_height="132dp"
+                android:contentDescription="Amanah Shield"
+                android:src="@drawable/ic_shield_logo" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:text="تم قفل الجهاز بواسطة AMANAH"
-                android:textColor="#FFFFFF"
-                android:textSize="18sp"
+                android:layout_marginTop="16dp"
+                android:text="Amanah Shield"
+                android:textColor="#FFF6DA"
+                android:textSize="20sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:gravity="center"
+                android:maxWidth="260dp"
+                android:text="This device is locked by parental safety policy. Contact a parent to unlock."
+                android:textColor="#E8D8B0"
+                android:textSize="14sp" />
+
+            <EditText
+                android:id="@+id/etOfflineUnlockCode"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/bg_input"
+                android:gravity="center"
+                android:hint="Emergency code"
+                android:importantForAutofill="no"
+                android:inputType="textVisiblePassword"
+                android:maxLength="16"
+                android:textAllCaps="true"
+                android:textColor="#FFF6DA"
+                android:textColorHint="#D7C89B"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnOfflineUnlock"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="10dp"
+                android:backgroundTint="#D1A23D"
+                android:text="Offline Emergency Unlock"
+                android:textAllCaps="false"
+                android:textColor="#2A1603"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvOfflineUnlockStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="يرجى مراجعة الوالدين لإلغاء القفل."
-                android:textColor="#64748b"
+                android:gravity="center"
+                android:maxWidth="280dp"
+                android:text=""
+                android:textColor="#F8DFA9"
                 android:textSize="12sp" />
         </LinearLayout>
     </FrameLayout>

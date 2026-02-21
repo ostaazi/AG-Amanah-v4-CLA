@@ -36,7 +36,9 @@ class AppUsageTrackerService : Service() {
     companion object {
         private const val TAG = "AppUsageTracker"
         private const val REPORT_INTERVAL_MS = 15 * 60 * 1000L // 15 minutes
+        private const val PREFS_NAME = "AmanahPrefs"
         private const val USAGE_COLLECTION = "appUsage"
+        private const val CHILDREN_COLLECTION = "children"
     }
 
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -76,8 +78,10 @@ class AppUsageTrackerService : Service() {
     }
 
     private fun collectAndReportUsage() {
-        val childId = getSharedPreferences("amanah_prefs", MODE_PRIVATE)
-            .getString("child_id", null) ?: return
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val childId = prefs.getString("childDocumentId", null) ?: return
+        val parentId = prefs.getString("parentId", null) ?: return
+        val childName = prefs.getString("childName", "Child Device") ?: "Child Device"
 
         val usageStatsManager =
             getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return
@@ -123,10 +127,39 @@ class AppUsageTrackerService : Service() {
             }
 
         val totalMinutes = stats.sumOf { it.totalTimeInForeground / 60_000 }
+        val blockedTokens = prefs.getStringSet("blockedApps", emptySet())
+            ?.map { it.lowercase() }
+            ?.toSet()
+            ?: emptySet()
+        val childUsage = appUsageList.mapIndexed { index, row ->
+            val packageName = row["packageName"]?.toString().orEmpty().lowercase()
+            val appName = row["appName"]?.toString().orEmpty()
+            val minutes = when (val value = row["usageMinutes"]) {
+                is Long -> value.toInt()
+                is Int -> value
+                is Number -> value.toInt()
+                else -> 0
+            }
+            val isBlocked = blockedTokens.any { token ->
+                token.isNotBlank() &&
+                    (packageName == token ||
+                        packageName.contains(token) ||
+                        appName.lowercase().contains(token))
+            }
+            hashMapOf(
+                "id" to if (packageName.isNotBlank()) packageName else "app_$index",
+                "appName" to appName,
+                "icon" to "\uD83D\uDCF1",
+                "minutesUsed" to minutes,
+                "isBlocked" to isBlocked
+            )
+        }
 
         // Upload to Firestore
         val reportData = hashMapOf(
             "childId" to childId,
+            "parentId" to parentId,
+            "childName" to childName,
             "date" to java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()),
             "totalScreenTimeMinutes" to totalMinutes,
             "appCount" to appUsageList.size,
@@ -143,6 +176,18 @@ class AppUsageTrackerService : Service() {
             }
             .addOnFailureListener { e ->
                 Log.e(TAG, "Failed to upload usage report", e)
+            }
+
+        db.collection(CHILDREN_COLLECTION).document(childId)
+            .update(
+                hashMapOf<String, Any>(
+                    "appUsage" to childUsage,
+                    "currentScreenTime" to totalMinutes.toInt(),
+                    "lastUsageReportedAt" to Timestamp.now()
+                )
+            )
+            .addOnFailureListener { e ->
+                Log.w(TAG, "Failed to sync usage summary to child profile: ${e.message}")
             }
     }
 

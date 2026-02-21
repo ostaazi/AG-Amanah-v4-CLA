@@ -1,13 +1,21 @@
 package com.amanah.child.services
 
+import android.Manifest
 import android.app.ActivityManager
 import android.app.Service
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.location.Geocoder
+import android.location.Location
+import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Environment
@@ -16,9 +24,8 @@ import android.os.StatFs
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.amanah.child.receivers.AmanahAdminReceiver
-import android.app.admin.DevicePolicyManager
-import android.content.ComponentName
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
@@ -27,29 +34,26 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.Date
+import java.util.Locale
+import kotlin.math.roundToInt
 
-/**
- * DeviceHealthReporterService
- * ============================
- * Periodically reports device health metrics to Firestore:
- * - Battery level and charging state
- * - Storage usage
- * - Memory usage
- * - Network connectivity
- * - Permission status
- * - Service running status
- * - Device info
- *
- * This data is consumed by the web console's systemHealthService.ts
- */
 class DeviceHealthReporterService : Service() {
 
     companion object {
         private const val TAG = "HealthReporter"
-        private const val HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
+        private const val HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000L
+        private const val PREFS_NAME = "AmanahPrefs"
         private const val HEALTH_COLLECTION = "deviceHealth"
         private const val HISTORY_SUBCOLLECTION = "history"
+        private const val CHILDREN_COLLECTION = "children"
+        private const val WIFI_RSSI_UNKNOWN = -127
     }
+
+    private data class BatterySnapshot(
+        val level: Int,
+        val charging: Boolean
+    )
 
     private val scope = CoroutineScope(Dispatchers.IO)
     private val db = FirebaseFirestore.getInstance()
@@ -72,8 +76,6 @@ class DeviceHealthReporterService : Service() {
         super.onDestroy()
     }
 
-    // ─── Reporting Loop ─────────────────────────────────────────────────────
-
     private fun startReporting() {
         scope.launch {
             while (isActive) {
@@ -88,99 +90,97 @@ class DeviceHealthReporterService : Service() {
     }
 
     private fun reportHealth() {
-        val prefs = getSharedPreferences("amanah_prefs", MODE_PRIVATE)
-        val childId = prefs.getString("child_id", null) ?: return
-        val parentId = prefs.getString("parent_id", null) ?: return
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val childId = prefs.getString("childDocumentId", null)
+        val parentId = prefs.getString("parentId", null)
+        if (childId.isNullOrBlank() || parentId.isNullOrBlank()) {
+            Log.d(TAG, "Skipping health report: pairing data is missing.")
+            return
+        }
 
-        val healthData = collectHealthData(childId, parentId)
+        val healthData = collectHealthData(childId, parentId, prefs)
 
-        // Write to main health document
         db.collection(HEALTH_COLLECTION).document(childId)
             .set(healthData)
-            .addOnSuccessListener {
-                Log.d(TAG, "Health snapshot reported")
-            }
             .addOnFailureListener { e ->
-                Log.e(TAG, "Failed to report health", e)
+                Log.e(TAG, "Failed to report health snapshot", e)
             }
 
-        // Write to history subcollection for trend tracking
         db.collection(HEALTH_COLLECTION).document(childId)
             .collection(HISTORY_SUBCOLLECTION)
-            .add(hashMapOf(
-                "timestamp" to Timestamp.now(),
-                "batteryLevel" to healthData["batteryLevel"],
-                "networkType" to healthData["networkType"],
-                "storageUsedMB" to healthData["storageUsedMB"],
-                "storageTotalMB" to healthData["storageTotalMB"],
-                "score" to calculateScore(healthData)
-            ))
+            .add(
+                hashMapOf(
+                    "childId" to childId,
+                    "parentId" to parentId,
+                    "timestamp" to Timestamp.now(),
+                    "batteryLevel" to healthData["batteryLevel"],
+                    "networkType" to healthData["networkType"],
+                    "networkStrength" to healthData["networkStrength"],
+                    "storageUsedMB" to healthData["storageUsedMB"],
+                    "storageTotalMB" to healthData["storageTotalMB"],
+                    "locationAvailable" to healthData.containsKey("location"),
+                    "score" to calculateScore(healthData)
+                )
+            )
+            .addOnFailureListener { e ->
+                Log.w(TAG, "Failed to append health history: ${e.message}")
+            }
+
+        syncChildLiveState(childId, healthData)
     }
 
-    // ─── Data Collection ────────────────────────────────────────────────────
+    private fun collectHealthData(
+        childId: String,
+        parentId: String,
+        prefs: SharedPreferences
+    ): HashMap<String, Any?> {
+        val now = Timestamp.now()
+        val battery = getBatterySnapshot()
+        val networkType = getNetworkType()
+        val networkStrength = getNetworkStrength(networkType)
+        val locationSnapshot = getLocationSnapshot()
 
-    private fun collectHealthData(childId: String, parentId: String): HashMap<String, Any?> {
-        return hashMapOf(
+        val payload = hashMapOf<String, Any?>(
             "childId" to childId,
             "parentId" to parentId,
-            "childName" to getSharedPreferences("amanah_prefs", MODE_PRIVATE)
-                .getString("child_name", ""),
-
-            // Battery
-            "batteryLevel" to getBatteryLevel(),
-            "batteryCharging" to isBatteryCharging(),
-
-            // Storage
+            "childName" to prefs.getString("childName", ""),
+            "batteryLevel" to battery.level,
+            "batteryCharging" to battery.charging,
             "storageUsedMB" to getStorageUsedMB(),
             "storageTotalMB" to getStorageTotalMB(),
-
-            // Memory
             "memoryUsedMB" to getMemoryUsedMB(),
             "memoryTotalMB" to getMemoryTotalMB(),
-
-            // Network
-            "networkType" to getNetworkType(),
-            "networkStrength" to getNetworkStrength(),
-
-            // Uptime
+            "networkType" to networkType,
+            "networkStrength" to networkStrength,
             "uptimeMinutes" to (SystemClock.elapsedRealtime() / 60_000),
-
-            // Timestamps
-            "lastHeartbeat" to Timestamp.now(),
-            "reportedAt" to Timestamp.now(),
-
-            // Permissions
+            "lastHeartbeat" to now,
+            "reportedAt" to now,
             "permissionsGranted" to getPermissionStatuses(),
-
-            // Service status
             "isAccessibilityEnabled" to isAccessibilityEnabled(),
             "isDeviceAdminEnabled" to isDeviceAdminEnabled(),
-            "isRemoteServiceRunning" to true, // This service is running
-
-            // Device info
+            "isRemoteServiceRunning" to true,
             "appVersion" to getAppVersion(),
             "osVersion" to "Android ${Build.VERSION.RELEASE}",
-            "deviceModel" to "${Build.MANUFACTURER} ${Build.MODEL}"
+            "deviceModel" to "${Build.MANUFACTURER} ${Build.MODEL}",
+            "locationPermissionGranted" to hasLocationPermission()
         )
+
+        if (locationSnapshot != null) {
+            payload["location"] = locationSnapshot
+        }
+        return payload
     }
 
-    // ─── Battery ────────────────────────────────────────────────────────────
-
-    private fun getBatteryLevel(): Int {
+    private fun getBatterySnapshot(): BatterySnapshot {
         val batteryIntent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-        return if (level >= 0 && scale > 0) (level * 100 / scale) else 0
-    }
-
-    private fun isBatteryCharging(): Boolean {
-        val batteryIntent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val computedLevel = if (level >= 0 && scale > 0) (level * 100 / scale) else 0
         val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-        return status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                status == BatteryManager.BATTERY_STATUS_FULL
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == BatteryManager.BATTERY_STATUS_FULL
+        return BatterySnapshot(computedLevel.coerceIn(0, 100), charging)
     }
-
-    // ─── Storage ────────────────────────────────────────────────────────────
 
     private fun getStorageUsedMB(): Long {
         val stat = StatFs(Environment.getDataDirectory().path)
@@ -193,8 +193,6 @@ class DeviceHealthReporterService : Service() {
         val stat = StatFs(Environment.getDataDirectory().path)
         return (stat.blockSizeLong * stat.blockCountLong) / (1024 * 1024)
     }
-
-    // ─── Memory ─────────────────────────────────────────────────────────────
 
     private fun getMemoryUsedMB(): Long {
         val activityManager = getSystemService(ACTIVITY_SERVICE) as? ActivityManager ?: return 0
@@ -210,8 +208,6 @@ class DeviceHealthReporterService : Service() {
         return memInfo.totalMem / (1024 * 1024)
     }
 
-    // ─── Network ────────────────────────────────────────────────────────────
-
     private fun getNetworkType(): String {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return "unknown"
@@ -224,37 +220,135 @@ class DeviceHealthReporterService : Service() {
         }
     }
 
-    private fun getNetworkStrength(): Int {
-        // Simplified: return based on network type
-        return when (getNetworkType()) {
-            "wifi" -> 80
-            "mobile" -> 60
-            "none" -> 0
-            else -> 30
+    private fun getNetworkStrength(networkType: String): Int {
+        if (networkType == "wifi") {
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            val info = wifiManager?.connectionInfo
+            val rssi = info?.rssi ?: WIFI_RSSI_UNKNOWN
+            if (rssi != WIFI_RSSI_UNKNOWN) {
+                @Suppress("DEPRECATION")
+                return WifiManager.calculateSignalLevel(rssi, 101).coerceIn(0, 100)
+            }
+            return 75
+        }
+        if (networkType == "mobile") {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val active = cm?.activeNetwork ?: return 55
+            val capabilities = cm.getNetworkCapabilities(active) ?: return 55
+            val downKbps = capabilities.linkDownstreamBandwidthKbps
+            return when {
+                downKbps >= 50_000 -> 85
+                downKbps >= 20_000 -> 70
+                downKbps >= 5_000 -> 55
+                downKbps > 0 -> 35
+                else -> 50
+            }
+        }
+        return if (networkType == "none") 0 else 30
+    }
+
+    private fun getLocationSnapshot(): HashMap<String, Any?>? {
+        if (!hasLocationPermission()) return null
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+
+        val providers = listOf(
+            LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER,
+            LocationManager.PASSIVE_PROVIDER
+        )
+        var latestLocation: Location? = null
+
+        for (provider in providers) {
+            val candidate = try {
+                locationManager.getLastKnownLocation(provider)
+            } catch (_: SecurityException) {
+                null
+            } catch (_: Exception) {
+                null
+            }
+            if (candidate != null && (latestLocation == null || candidate.time > latestLocation.time)) {
+                latestLocation = candidate
+            }
+        }
+
+        val best = latestLocation ?: return null
+        val fixTimestampMs = if (best.time > 0L) best.time else System.currentTimeMillis()
+        val lat = roundCoordinate(best.latitude)
+        val lng = roundCoordinate(best.longitude)
+        val address = resolveAddress(lat, lng)
+
+        return hashMapOf(
+            "lat" to lat,
+            "lng" to lng,
+            "address" to address,
+            "provider" to (best.provider ?: "unknown"),
+            "accuracyM" to best.accuracy.toDouble(),
+            "fixAgeSec" to ((System.currentTimeMillis() - fixTimestampMs).coerceAtLeast(0L) / 1000L),
+            "lastUpdated" to Timestamp(Date(fixTimestampMs))
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    private fun resolveAddress(lat: Double, lng: Double): String {
+        if (!Geocoder.isPresent()) return formatLatLng(lat, lng)
+        return try {
+            val geocoder = Geocoder(this, Locale.getDefault())
+            val first = geocoder.getFromLocation(lat, lng, 1)?.firstOrNull()
+            val pieces = listOfNotNull(
+                first?.subLocality,
+                first?.locality,
+                first?.adminArea,
+                first?.countryName
+            ).map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+
+            if (pieces.isNotEmpty()) pieces.joinToString(", ") else formatLatLng(lat, lng)
+        } catch (_: Exception) {
+            formatLatLng(lat, lng)
         }
     }
 
-    // ─── Permissions ────────────────────────────────────────────────────────
+    private fun formatLatLng(lat: Double, lng: Double): String {
+        return String.format(Locale.US, "%.5f, %.5f", lat, lng)
+    }
+
+    private fun roundCoordinate(value: Double): Double {
+        return (value * 1_000_000.0).roundToInt() / 1_000_000.0
+    }
+
+    private fun hasLocationPermission(): Boolean {
+        val fine = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        return fine || coarse
+    }
 
     private fun getPermissionStatuses(): List<HashMap<String, Any>> {
         val requiredPermissions = listOf(
-            "android.permission.ACCESS_FINE_LOCATION" to "Location",
-            "android.permission.CAMERA" to "Camera",
-            "android.permission.RECORD_AUDIO" to "Microphone",
-            "android.permission.READ_PHONE_STATE" to "Phone State",
-            "android.permission.POST_NOTIFICATIONS" to "Notifications"
+            Manifest.permission.ACCESS_FINE_LOCATION to "Location (Fine)",
+            Manifest.permission.ACCESS_COARSE_LOCATION to "Location (Coarse)",
+            Manifest.permission.ACCESS_BACKGROUND_LOCATION to "Location (Background)",
+            Manifest.permission.CAMERA to "Camera",
+            Manifest.permission.RECORD_AUDIO to "Microphone",
+            Manifest.permission.POST_NOTIFICATIONS to "Notifications"
         )
 
         return requiredPermissions.map { (permission, name) ->
             hashMapOf(
                 "name" to name,
-                "granted" to (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED),
+                "granted" to (
+                    ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+                    ),
                 "required" to true
             )
         }
     }
-
-    // ─── Service Status ─────────────────────────────────────────────────────
 
     private fun isAccessibilityEnabled(): Boolean {
         val serviceName = "${packageName}/${AmanahAccessibilityService::class.java.canonicalName}"
@@ -271,8 +365,6 @@ class DeviceHealthReporterService : Service() {
         return dpm.isAdminActive(adminComponent)
     }
 
-    // ─── App Info ───────────────────────────────────────────────────────────
-
     private fun getAppVersion(): String {
         return try {
             val pInfo = packageManager.getPackageInfo(packageName, 0)
@@ -282,7 +374,36 @@ class DeviceHealthReporterService : Service() {
         }
     }
 
-    // ─── Scoring ────────────────────────────────────────────────────────────
+    private fun syncChildLiveState(childId: String, healthData: HashMap<String, Any?>) {
+        val strength = (healthData["networkStrength"] as? Int) ?: 0
+        val updates = hashMapOf<String, Any>(
+            "batteryLevel" to ((healthData["batteryLevel"] as? Int) ?: 0),
+            "signalStrength" to toSignalBars(strength),
+            "status" to if ((healthData["networkType"] as? String) == "none") "offline" else "online",
+            "lastSeenAt" to Timestamp.now()
+        )
+
+        val location = healthData["location"]
+        if (location is Map<*, *>) {
+            updates["location"] = location
+        }
+
+        db.collection(CHILDREN_COLLECTION).document(childId)
+            .update(updates)
+            .addOnFailureListener { e ->
+                Log.w(TAG, "Failed to sync child live state: ${e.message}")
+            }
+    }
+
+    private fun toSignalBars(networkStrength: Int): Int {
+        return when {
+            networkStrength >= 75 -> 4
+            networkStrength >= 50 -> 3
+            networkStrength >= 25 -> 2
+            networkStrength > 0 -> 1
+            else -> 0
+        }
+    }
 
     private fun calculateScore(data: HashMap<String, Any?>): Int {
         var score = 0

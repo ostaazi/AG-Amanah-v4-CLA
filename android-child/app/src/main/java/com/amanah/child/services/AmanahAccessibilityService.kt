@@ -7,16 +7,23 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.amanah.child.R
+import com.amanah.child.utils.OfflineUnlockManager
 import com.amanah.child.utils.SecurityCortex
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -24,8 +31,24 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class AmanahAccessibilityService : AccessibilityService() {
+    companion object {
+        private const val PREFS_NAME = "AmanahPrefs"
+        private const val PREF_BLOCKED_APPS = "blockedApps"
+        private const val PREF_PARTIAL_POLICIES = "blockedPartialPolicies"
+        private const val PARTIAL_POLICY_DELIM = "||"
+        private const val PARTIAL_PATTERN_DELIM = "@@"
+        private const val TEXT_AGG_WINDOW_MS = 12_000L
+        private const val TEXT_AGG_MAX_SNIPPETS = 18
+    }
+
+    private data class PartialBlockPolicy(
+        val token: String,
+        val scope: String,
+        val patterns: Set<String>
+    )
 
     private val db = FirebaseFirestore.getInstance()
     private val serviceScope = CoroutineScope(Dispatchers.IO)
@@ -36,6 +59,7 @@ class AmanahAccessibilityService : AccessibilityService() {
     private var lockOverlayView: View? = null
     private var lockOverlayShown = false
     private var lockStateReceiver: BroadcastReceiver? = null
+    private val recentTextByPackage = mutableMapOf<String, ArrayDeque<Pair<Long, String>>>()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -101,10 +125,16 @@ class AmanahAccessibilityService : AccessibilityService() {
         if (!relevantEvent) return
 
         val text = extractEventText(event)
-        if (text.length < 3) return
+        val partialReason = resolvePartialIsolationReason(packageName, event, text)
+        if (partialReason != null) {
+            handleBlockedApp(packageName, partialReason)
+            return
+        }
 
         val currentTime = System.currentTimeMillis()
-        
+        val aggregatedText = aggregateRecentText(packageName, text, currentTime)
+        if (aggregatedText.length < 3) return
+
         // D2: Record Screen Time (approximate based on event intervals)
         if (lastProcessTime > 0) {
             val diff = currentTime - lastProcessTime
@@ -116,12 +146,12 @@ class AmanahAccessibilityService : AccessibilityService() {
             }
         }
 
-        val isDuplicate = text == lastProcessedText && (currentTime - lastProcessTime) <= 10000
+        val isDuplicate = aggregatedText == lastProcessedText && (currentTime - lastProcessTime) <= 10000
         if (isDuplicate) return
 
-        lastProcessedText = text
+        lastProcessedText = aggregatedText
         lastProcessTime = currentTime
-        processContent(text, packageName)
+        processContent(aggregatedText, packageName)
     }
 
     private fun rememberForegroundApp(packageName: String) {
@@ -143,6 +173,33 @@ class AmanahAccessibilityService : AccessibilityService() {
 
         return listOf(direct, sourceText, desc)
             .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun aggregateRecentText(packageName: String, freshText: String, now: Long): String {
+        val normalizedFresh = freshText
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        val queue = recentTextByPackage.getOrPut(packageName) { ArrayDeque() }
+        if (normalizedFresh.length >= 2) {
+            val previous = queue.lastOrNull()?.second
+            if (!normalizedFresh.equals(previous, ignoreCase = true)) {
+                queue.addLast(now to normalizedFresh)
+            }
+        }
+
+        while (queue.isNotEmpty() && now - queue.first().first > TEXT_AGG_WINDOW_MS) {
+            queue.removeFirst()
+        }
+        while (queue.size > TEXT_AGG_MAX_SNIPPETS) {
+            queue.removeFirst()
+        }
+
+        return queue
+            .map { it.second }
             .joinToString(" ")
             .replace(Regex("\\s+"), " ")
             .trim()
@@ -195,8 +252,8 @@ class AmanahAccessibilityService : AccessibilityService() {
     }
 
     private fun isBlockedApp(packageName: String): Boolean {
-        val blocked = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
-            .getStringSet("blockedApps", emptySet())
+        val blocked = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .getStringSet(PREF_BLOCKED_APPS, emptySet())
             ?.map { it.lowercase() }
             ?.toSet()
             ?: emptySet()
@@ -221,10 +278,28 @@ class AmanahAccessibilityService : AccessibilityService() {
         val childId = prefs.getString("childDocumentId", null) ?: return
         val childName = prefs.getString("childName", "My Child")
 
-        val content = if (reason == "camera_mic_policy") {
-            "Camera/microphone sensitive app launch blocked by child policy."
+        val scope = if (reason.startsWith("partial_isolation:")) {
+            reason.substringAfter("partial_isolation:").ifBlank { "messaging" }
         } else {
-            "Blocked app launch prevented by child policy."
+            ""
+        }
+
+        val content = when {
+            reason == "camera_mic_policy" ->
+                "Camera/microphone sensitive app launch blocked by child policy."
+            reason.startsWith("partial_isolation:") ->
+                "Partial app isolation blocked risky $scope surface inside the monitored app."
+            else ->
+                "Blocked app launch prevented by child policy."
+        }
+
+        val aiAnalysis = when {
+            reason == "camera_mic_policy" ->
+                "Package blocked by blockCameraAndMic policy."
+            reason.startsWith("partial_isolation:") ->
+                "Partial isolation policy blocked scope=$scope in this app session."
+            else ->
+                "Package blocked by remote blockApp command."
         }
 
         val alert = hashMapOf(
@@ -235,19 +310,116 @@ class AmanahAccessibilityService : AccessibilityService() {
             "content" to content,
             "category" to "TAMPER",
             "severity" to "MEDIUM",
-            "aiAnalysis" to if (reason == "camera_mic_policy")
-                "Package blocked by blockCameraAndMic policy."
-            else
-                "Package blocked by remote blockApp command.",
+            "aiAnalysis" to aiAnalysis,
             "actionTaken" to "Forced return to Home screen",
             "timestamp" to Timestamp.now(),
             "status" to "NEW"
         )
+        if (scope.isNotBlank()) {
+            alert["policyScope"] = scope
+        }
 
         db.collection("alerts").add(alert)
             .addOnFailureListener { e ->
                 Log.w("AmanahService", "Failed to upload blocked-app alert", e)
             }
+    }
+
+    private fun resolvePartialIsolationReason(
+        packageName: String,
+        event: AccessibilityEvent,
+        text: String
+    ): String? {
+        val policies = loadPartialPoliciesForPackage(packageName)
+        if (policies.isEmpty()) return null
+
+        val signal = buildUiSignalText(event, text)
+        if (signal.isBlank()) return null
+
+        for (policy in policies) {
+            val scopeMatched = matchesScopeSignal(policy.scope, signal)
+            val patternMatched = policy.patterns.any { signal.contains(it) }
+            if (scopeMatched || patternMatched) {
+                return "partial_isolation:${policy.scope}"
+            }
+        }
+        return null
+    }
+
+    private fun loadPartialPoliciesForPackage(packageName: String): List<PartialBlockPolicy> {
+        val raw = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .getStringSet(PREF_PARTIAL_POLICIES, emptySet())
+            ?: emptySet()
+        if (raw.isEmpty()) return emptyList()
+
+        val pkg = packageName.lowercase(Locale.getDefault())
+        return raw.mapNotNull { decodePartialPolicy(it) }
+            .filter { policy ->
+                pkg == policy.token || pkg.contains(policy.token) || policy.token.contains(pkg)
+            }
+    }
+
+    private fun decodePartialPolicy(raw: String): PartialBlockPolicy? {
+        val parts = raw.split(PARTIAL_POLICY_DELIM)
+        if (parts.size < 2) return null
+        val token = parts[0].trim().lowercase(Locale.getDefault())
+        val scope = parts[1].trim().lowercase(Locale.getDefault())
+        if (token.isBlank() || scope.isBlank()) return null
+
+        val patterns = if (parts.size >= 3) {
+            parts[2].split(PARTIAL_PATTERN_DELIM)
+                .map { normalizePolicyText(it) }
+                .filter { it.isNotBlank() }
+                .toSet()
+        } else {
+            emptySet()
+        }
+        return PartialBlockPolicy(token = token, scope = scope, patterns = patterns)
+    }
+
+    private fun buildUiSignalText(event: AccessibilityEvent, text: String): String {
+        val sourceId = try {
+            event.source?.viewIdResourceName.orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        val className = event.className?.toString().orEmpty()
+        val contentDescription = event.contentDescription?.toString().orEmpty()
+        val combined = listOf(text, sourceId, className, contentDescription)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+        return normalizePolicyText(combined)
+    }
+
+    private fun normalizePolicyText(value: String): String {
+        return value
+            .trim()
+            .lowercase(Locale.getDefault())
+            .replace(Regex("[^\\p{L}\\p{N}\\s:_-]"), " ")
+            .replace(Regex("\\s+"), " ")
+    }
+
+    private fun matchesScopeSignal(scope: String, signal: String): Boolean {
+        val keywords = when (scope) {
+            "messaging" -> setOf(
+                "message", "messages", "chat", "chats", "inbox", "typing",
+                "رسالة", "رسائل", "مراسلة", "دردشة", "محادثة", "اكتب"
+            )
+            "private_chat" -> setOf(
+                "private", "secret", "dm", "direct message", "inbox", "1:1",
+                "خاص", "رسالة خاصة", "محادثة خاصة", "دايركت"
+            )
+            "rooms" -> setOf(
+                "room", "rooms", "group", "groups", "channel", "channels", "server", "lobby",
+                "غرفة", "غرف", "روم", "مجموعة", "مجموعات", "قناة", "قنوات", "سيرفر"
+            )
+            "comments" -> setOf(
+                "comment", "comments", "reply", "replies", "thread",
+                "تعليق", "تعليقات", "رد", "ردود", "سلسلة"
+            )
+            else -> emptySet()
+        }
+        return keywords.any { keyword -> signal.contains(keyword) }
     }
 
     private fun isCameraMicPolicyActive(): Boolean {
@@ -275,7 +447,7 @@ class AmanahAccessibilityService : AccessibilityService() {
     private fun uploadAlert(content: String, platform: String, analysis: SecurityCortex.AnalysisResult) {
         val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
         val parentId = prefs.getString("parentId", null)
-        val childName = prefs.getString("childName", "My Child")
+        val childName = prefs.getString("childName", "My Child") ?: "My Child"
         val childId = prefs.getString("childDocumentId", null)
 
         if (parentId == null || childId == null) {
@@ -283,7 +455,23 @@ class AmanahAccessibilityService : AccessibilityService() {
             return
         }
 
-        val alert = hashMapOf(
+        val normalizedText = analysis.normalizedExcerpt.ifBlank {
+            SecurityCortex.normalizeTextForAudit(content)
+        }
+        val obfuscationLikely = isLikelyObfuscated(content, normalizedText)
+        val reasonAr = analysis.reasonAr.ifBlank {
+            "تم رصد مؤشر نصي ضمن فئة ${analysis.category}."
+        }
+        val reasonEn = analysis.reasonEn.ifBlank {
+            "Text risk indicator detected for category ${analysis.category}."
+        }
+        val aiSummary = buildString {
+            append("Local text detection matched policy rules.")
+            append(" | AR: $reasonAr")
+            append(" | EN: $reasonEn")
+        }
+
+        val alert = hashMapOf<String, Any>(
             "parentId" to parentId,
             "childId" to childId,
             "childName" to childName,
@@ -291,12 +479,26 @@ class AmanahAccessibilityService : AccessibilityService() {
             "content" to content,
             "category" to analysis.category,
             "severity" to analysis.severity,
-            "aiAnalysis" to "Local text detection matched restricted patterns.",
-            "actionTaken" to "Logged & Parent Notified",
+            "aiAnalysis" to aiSummary,
+            "actionTaken" to "Normalized bilingual explanation attached.",
             "timestamp" to Timestamp.now(),
             "status" to "NEW",
-            "suspectId" to "Unknown"
+            "suspectId" to "Unknown",
+            "triggerType" to "TEXT",
+            "analysisReasonAr" to reasonAr,
+            "analysisReasonEn" to reasonEn,
+            "triggerRawText" to content.take(2000),
+            "triggerNormalizedText" to normalizedText.take(2000),
+            "normalizationChanged" to (content != normalizedText),
+            "obfuscationLikely" to obfuscationLikely
         )
+        if (analysis.matchedSignals.isNotEmpty()) {
+            alert["matchedSignals"] = analysis.matchedSignals.take(8)
+        }
+        val frame = ScreenGuardianService.peekLatestFrameData()
+        if (!frame.isNullOrBlank()) {
+            alert["imageData"] = frame
+        }
 
         db.collection("alerts")
             .add(alert)
@@ -306,6 +508,14 @@ class AmanahAccessibilityService : AccessibilityService() {
             .addOnFailureListener { e ->
                 Log.e("AmanahService", "Failed to upload alert", e)
             }
+    }
+
+    private fun isLikelyObfuscated(rawText: String, normalizedText: String): Boolean {
+        if (rawText.isBlank() || normalizedText.isBlank()) return false
+        val rawCompact = rawText.lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
+        val normalizedCompact = normalizedText.lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
+        val hasMaskingChars = rawText.contains(Regex("[0-9@\\$\\*\\-_\\.]+"))
+        return hasMaskingChars || rawCompact != normalizedCompact
     }
 
     private fun syncLockOverlay(): Boolean {
@@ -356,6 +566,7 @@ class AmanahAccessibilityService : AccessibilityService() {
             // Update message on existing view if needed.
             val msgView = lockOverlayView?.findViewWithTag<TextView>("lock_message")
             msgView?.text = message
+            lockOverlayView?.let { applyOfflineUnlockVisibility(it) }
             return
         }
 
@@ -405,7 +616,7 @@ class AmanahAccessibilityService : AccessibilityService() {
 
     private fun buildLockOverlayView(message: String): View {
         val root = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
+            setBackgroundColor(Color.parseColor("#E6000000"))
             isClickable = true
             isFocusable = true
             // Consume all touches to block interactions beneath.
@@ -415,43 +626,185 @@ class AmanahAccessibilityService : AccessibilityService() {
         val center = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(
+                    Color.parseColor("#8A1538"),
+                    Color.parseColor("#3A0715")
+                )
+            ).apply {
+                cornerRadius = dp(24).toFloat()
+                setStroke(dp(2), Color.parseColor("#D1A23D"))
+            }
+            setPadding(dp(28), dp(28), dp(28), dp(24))
         }
 
         val logo = ImageView(this).apply {
             setImageResource(R.drawable.ic_shield_logo)
-            alpha = 0.4f
-            layoutParams = LinearLayout.LayoutParams(240, 240)
+            layoutParams = LinearLayout.LayoutParams(dp(128), dp(128))
         }
 
         val title = TextView(this).apply {
-            text = "تم تفعيل الحجب بواسطة AMANAH"
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            setPadding(0, 40, 0, 0)
+            text = "Amanah Shield"
+            setTextColor(Color.parseColor("#FFF6DA"))
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(16), 0, 0)
             gravity = Gravity.CENTER
         }
 
         val msg = TextView(this).apply {
             tag = "lock_message"
             text = message
-            setTextColor(Color.parseColor("#94a3b8"))
-            textSize = 12f
-            setPadding(0, 18, 0, 0)
+            setTextColor(Color.parseColor("#E8D8B0"))
+            textSize = 14f
+            setPadding(0, dp(12), 0, 0)
             gravity = Gravity.CENTER
+            maxWidth = dp(260)
+        }
+
+        val codeInput = EditText(this).apply {
+            tag = "offline_unlock_input"
+            hint = "Emergency code"
+            setTextColor(Color.parseColor("#FFF6DA"))
+            setHintTextColor(Color.parseColor("#D7C89B"))
+            textSize = 16f
+            gravity = Gravity.CENTER
+            maxLines = 1
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            filters = arrayOf(android.text.InputFilter.LengthFilter(16))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), Color.parseColor("#D1A23D"))
+                setColor(Color.parseColor("#33121212"))
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(14)
+            }
+        }
+
+        val unlockButton = Button(this).apply {
+            tag = "offline_unlock_button"
+            text = "Offline Emergency Unlock"
+            setTextColor(Color.parseColor("#2A1603"))
+            textSize = 13f
+            isAllCaps = false
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(
+                    Color.parseColor("#F7DE8D"),
+                    Color.parseColor("#D1A23D")
+                )
+            ).apply {
+                cornerRadius = dp(12).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(10)
+            }
+        }
+
+        val offlineStatus = TextView(this).apply {
+            tag = "offline_unlock_status"
+            val remaining = OfflineUnlockManager.backupCodesRemaining(this@AmanahAccessibilityService)
+            text = if (remaining > 0) "Emergency backup codes remaining: $remaining" else ""
+            setTextColor(Color.parseColor("#F8DFA9"))
+            textSize = 11f
+            setPadding(0, dp(8), 0, 0)
+            gravity = Gravity.CENTER
+            maxWidth = dp(280)
+        }
+
+        unlockButton.setOnClickListener {
+            if (isDeviceOnline()) {
+                codeInput.setText("")
+                offlineStatus.text = ""
+                applyOfflineUnlockVisibility(root)
+                return@setOnClickListener
+            }
+            val code = codeInput.text?.toString().orEmpty()
+            val result = OfflineUnlockManager.verifyCode(this, code)
+            if (!result.success) {
+                offlineStatus.setTextColor(Color.parseColor("#FCA5A5"))
+                offlineStatus.text = result.message
+                return@setOnClickListener
+            }
+            OfflineUnlockManager.clearLockState(this, "accessibility_overlay")
+            codeInput.setText("")
+            offlineStatus.setTextColor(Color.parseColor("#86EFAC"))
+            offlineStatus.text = result.message
+            syncLockOverlay()
+            try {
+                sendBroadcast(Intent(RemoteCommandService.ACTION_LOCK_STATE_CHANGED))
+            } catch (_: Exception) {
+            }
         }
 
         center.addView(logo)
         center.addView(title)
         center.addView(msg)
+        center.addView(codeInput)
+        center.addView(unlockButton)
+        center.addView(offlineStatus)
+        applyOfflineUnlockVisibility(root)
 
         val rootParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply {
             gravity = Gravity.CENTER
+            marginStart = dp(24)
+            marginEnd = dp(24)
         }
         root.addView(center, rootParams)
         return root
+    }
+
+    private fun applyOfflineUnlockVisibility(root: View) {
+        val codeInput = root.findViewWithTag<EditText>("offline_unlock_input") ?: return
+        val unlockButton = root.findViewWithTag<Button>("offline_unlock_button") ?: return
+        val statusView = root.findViewWithTag<TextView>("offline_unlock_status") ?: return
+
+        if (isDeviceOnline()) {
+            // Online lock screen keeps the legacy policy view (no offline emergency controls).
+            codeInput.visibility = View.GONE
+            unlockButton.visibility = View.GONE
+            statusView.visibility = View.GONE
+            codeInput.setText("")
+            statusView.text = ""
+            return
+        }
+
+        codeInput.visibility = View.VISIBLE
+        unlockButton.visibility = View.VISIBLE
+        statusView.visibility = View.VISIBLE
+        if (statusView.text.isNullOrBlank()) {
+            val remaining = OfflineUnlockManager.backupCodesRemaining(this)
+            if (remaining > 0) {
+                statusView.text = "Emergency backup codes remaining: $remaining"
+                statusView.setTextColor(Color.parseColor("#F8DFA9"))
+            }
+        }
+    }
+
+    private fun isDeviceOnline(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val network = cm.activeNetwork ?: return false
+        val capabilities = cm.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).toInt()
     }
 
     override fun onInterrupt() {
@@ -466,6 +819,7 @@ class AmanahAccessibilityService : AccessibilityService() {
         }
         lockStateReceiver = null
         hideLockOverlay()
+        recentTextByPackage.clear()
         serviceScope.cancel()
     }
 }

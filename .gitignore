@@ -49,3 +49,11 @@ nul
 
 # local eslint reports
 tmp_eslint_report.json
+
+# benchmark gate artifacts
+benchmarks/reports/latest-gate-summary.json
+
+# local encoding preview artifacts
+*.decoded.preview
+tmp_decode_preview.js
+tmp_decode_preview.mjs

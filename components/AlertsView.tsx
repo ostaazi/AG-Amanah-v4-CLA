@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MonitoringAlert, AlertSeverity, Category } from '../types';
 import { ICONS } from '../constants';
+import { formatTimeDefault } from '../services/dateTimeFormat';
 
 const AlertsView: React.FC<{
   alerts: MonitoringAlert[];
@@ -86,7 +87,7 @@ const AlertsView: React.FC<{
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      {new Date(alert.timestamp).toLocaleTimeString()}
+                      {formatTimeDefault(alert.timestamp as any, { includeSeconds: true })}
                     </span>
                     <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <ICONS.Vault />

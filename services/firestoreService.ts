@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   collection,
   addDoc,
@@ -173,9 +173,9 @@ const mapInviteEmailError = (error: any): string => {
     case 'auth/unauthorized-continue-uri':
       return 'رابط الدعوة غير مُصرّح به في إعدادات Firebase. | Invite URL not authorized.';
     case 'auth/quota-exceeded':
-      return 'تم تجاوز حصة البريد. حاول لاحقاً. | Email quota exceeded.';
+      return 'تم تجاوز حصة البريد. حاول لاحقًا. | Email quota exceeded.';
     case 'auth/too-many-requests':
-      return 'محاولات كثيرة جداً. حاول لاحقاً. | Too many attempts, try later.';
+      return 'محاولات كثيرة جدًا. حاول لاحقًا. | Too many attempts, try later.';
     case 'auth/network-request-failed':
       return 'خطأ في الشبكة أثناء إرسال الدعوة. | Network error sending invitation.';
     default:
@@ -753,7 +753,7 @@ const validateDocumentId = (id: string, fieldName: string = 'ID'): void => {
 };
 
 /**
- * وظيفة تطهير البيانات العميقة لمنع أخطاء Circular Reference وتحويل التواريخ
+ * Deep data sanitizer to avoid circular references and normalize timestamp-like values.
  */
 const sanitizeData = (data: any, seen = new WeakSet()): any => {
   if (data === null || data === undefined) return data;
@@ -789,6 +789,16 @@ const isPermissionDeniedError = (error: any): boolean => {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
   return code === 'permission-denied' || message.includes('Missing or insufficient permissions');
+};
+
+const isIndexRequiredError = (error: any): boolean => {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return (
+    code === 'failed-precondition' ||
+    message.includes('requires an index') ||
+    message.includes('The query requires an index')
+  );
 };
 
 const isMockTaggedData = (data: any): boolean =>
@@ -982,7 +992,7 @@ export const sendRemoteCommand = async (childId: string, command: string, value:
 /**
  * Generate a cryptographically secure pairing key.
  * Uses crypto.getRandomValues for unpredictable output.
- * Format: 12-character alphanumeric (62^12 ≈ 3.2×10^21 combinations)
+ * Format: 12-character alphanumeric (62^12 ~= 3.2x10^21 combinations)
  */
 const generateSecurePairingKey = (): string => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -1069,7 +1079,7 @@ export const subscribeToAlerts = (
   callback: (alerts: MonitoringAlert[]) => void
 ) => {
   if (!db || !parentId) return () => { };
-  // جلب أحدث 100 تنبيه مرتبة زمنياً
+  // Fetch latest 100 alerts ordered by newest first.
   const q = query(
     collection(db, ALERTS_COLLECTION),
     where('parentId', '==', parentId),
@@ -1096,22 +1106,40 @@ export const subscribeToAlerts = (
       callback(alerts);
     },
     (err) => {
-      console.warn('Firestore Alerts Error (Check Indexes):', err);
-      // Fallback: Use simple query (no orderBy) and sort in client
+      if (isPermissionDeniedError(err)) {
+        console.warn('Firestore Alerts Error (permission denied):', err);
+        callback([]);
+        return;
+      }
+      if (!isIndexRequiredError(err)) {
+        console.warn('Firestore Alerts Error:', err);
+      }
+      // Fallback: use simple query (no orderBy) and sort in client to survive index outages.
       const simpleQ = query(collection(db, ALERTS_COLLECTION), where('parentId', '==', parentId));
-      unsubscribe = onSnapshot(simpleQ, (snap) => {
-        const fallbackAlerts = snap.docs
-          .map((d) => {
-            const raw = d.data();
-            if (isMockTaggedData(raw)) return null;
-            return { id: d.id, ...sanitizeData(raw) } as any;
-          })
-          .filter(Boolean)
-          .sort(
-            (a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-          );
-        callback(fallbackAlerts);
-      });
+      unsubscribe = onSnapshot(
+        simpleQ,
+        (snap) => {
+          const fallbackAlerts = snap.docs
+            .map((d) => {
+              const raw = d.data();
+              if (isMockTaggedData(raw)) return null;
+              return { id: d.id, ...sanitizeData(raw) } as any;
+            })
+            .filter(Boolean)
+            .sort(
+              (a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            );
+          callback(fallbackAlerts);
+        },
+        (fallbackErr) => {
+          if (isPermissionDeniedError(fallbackErr)) {
+            console.warn('Firestore Alerts fallback denied by rules:', fallbackErr);
+          } else {
+            console.warn('Firestore Alerts fallback failed:', fallbackErr);
+          }
+          callback([]);
+        }
+      );
     }
   );
 
@@ -1157,6 +1185,26 @@ export const addChildToDB = async (parentId: string, childData: Partial<Child>):
       playSiren: { value: false, timestamp: Timestamp.now() },
       cutInternet: { value: false, timestamp: Timestamp.now() },
       blockCameraAndMic: { value: false, timestamp: Timestamp.now() },
+      dnsFiltering: {
+        value: { enabled: false, mode: 'family', domains: [] },
+        timestamp: Timestamp.now(),
+      },
+      syncOfflineUnlockConfig: {
+        value: false,
+        timestamp: Timestamp.now(),
+      },
+      runVulnerabilityScan: {
+        value: false,
+        timestamp: Timestamp.now(),
+      },
+      setVisualThresholds: {
+        value: false,
+        timestamp: Timestamp.now(),
+      },
+      setTextRuleThresholds: {
+        value: false,
+        timestamp: Timestamp.now(),
+      },
       notifyParent: { value: false, timestamp: Timestamp.now() },
       startLiveStream: { value: false, timestamp: Timestamp.now() },
       stopLiveStream: { value: false, timestamp: Timestamp.now() },
@@ -1698,7 +1746,7 @@ export const fetchSystemPatches = async (parentId: string): Promise<SystemPatch[
   });
 };
 
-// ── SOS Emergency Alert ──────────────────────────────────────────────
+// SOS Emergency Alert
 
 export const sendSOSAlert = async (
   parentId: string,
@@ -1728,7 +1776,7 @@ export const sendSOSAlert = async (
   }
 };
 
-// ── Parent Messages ──────────────────────────────────────────────────
+// Parent Messages
 
 export const sendParentMessage = async (
   familyId: string,
@@ -1787,8 +1835,16 @@ export const subscribeToParentMessages = (
       callback(msgs);
     },
     (err) => {
-      console.error('Parent messages subscription error:', err);
+      if (isPermissionDeniedError(err)) {
+        console.warn('Parent messages subscription denied by rules:', err);
+      } else if (isIndexRequiredError(err)) {
+        console.warn('Parent messages query requires index. Deploy firestore.indexes.json:', err);
+      } else {
+        console.error('Parent messages subscription error:', err);
+      }
       callback([]);
     },
   );
 };
+
+

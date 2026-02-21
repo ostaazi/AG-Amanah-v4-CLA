@@ -9,17 +9,24 @@ import android.content.Context
 import android.content.Intent
 import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.VpnService
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Base64
+import android.provider.Settings
 import android.util.Log
 import com.amanah.child.services.ScreenCaptureSessionStore
 import androidx.core.app.NotificationCompat
 import com.amanah.child.MainActivity
 import com.amanah.child.R
 import com.amanah.child.receivers.AmanahAdminReceiver
+import com.amanah.child.utils.OfflineUnlockManager
+import com.amanah.child.utils.SecurityCortex
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -33,19 +40,51 @@ class RemoteCommandService : Service() {
     companion object {
         // In-app broadcast to notify AccessibilityService to refresh overlay state.
         const val ACTION_LOCK_STATE_CHANGED = "com.amanah.child.ACTION_LOCK_STATE_CHANGED"
+        private const val NETWORK_PULSE_INTERVAL_MS = 30_000L
+        private const val WIFI_ENABLE_BACKOFF_MS = 60_000L
+        private const val NETWORK_RECOVERY_BACKOFF_MS = 30_000L
+        private const val PREFS_NAME = "AmanahPrefs"
+        private const val PREF_BLOCKED_APPS = "blockedApps"
+        private const val PREF_PARTIAL_POLICIES = "blockedPartialPolicies"
+        private const val PARTIAL_POLICY_DELIM = "||"
+        private const val PARTIAL_PATTERN_DELIM = "@@"
     }
+
+    private data class BlockAppCommandResult(
+        val applied: Boolean,
+        val blocked: Boolean = false,
+        val scope: String = "app",
+        val targetCount: Int = 0
+    )
 
     private val db by lazy { FirebaseFirestore.getInstance() }
     private val auth by lazy { FirebaseAuth.getInstance() }
     private var commandListener: ListenerRegistration? = null
+    private var listeningChildId: String? = null
     private val lastCommandTimestamps = mutableMapOf<String, Long>()
     private var lastLockRequested = false
     private var lastScreenshotRequested = false
     private var lastSirenRequested = false
+    private val retryHandler = Handler(Looper.getMainLooper())
+    private val pulseHandler = Handler(Looper.getMainLooper())
+    private var authRetryCount = 0
+    private var authInProgress = false
+    private var lastWifiEnableAttemptAt = 0L
+    private var lastNetworkRecoveryAt = 0L
+    private var offlineUnlockSyncInFlight = false
+    private val MAX_AUTH_RETRIES = 20
+    private val networkPulseRunnable = object : Runnable {
+        override fun run() {
+            runNetworkPulse()
+            pulseHandler.postDelayed(this, NETWORK_PULSE_INTERVAL_MS)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         startAsForeground()
+        enforceSavedDnsPolicy()
+        pulseHandler.post(networkPulseRunnable)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -54,7 +93,11 @@ class RemoteCommandService : Service() {
     }
 
     override fun onDestroy() {
+        pulseHandler.removeCallbacks(networkPulseRunnable)
+        retryHandler.removeCallbacksAndMessages(null)
         commandListener?.remove()
+        commandListener = null
+        listeningChildId = null
         super.onDestroy()
     }
 
@@ -93,23 +136,75 @@ class RemoteCommandService : Service() {
     }
 
     private fun ensureAuthAndListen() {
+        // Always enforce lock state from SharedPreferences (works offline)
+        enforceSavedLockState()
+
         if (auth.currentUser != null) {
+            authRetryCount = 0
             startListeningIfPaired()
             return
         }
 
+        if (authInProgress) {
+            return
+        }
+        authInProgress = true
+
         auth.signInAnonymously()
-            .addOnSuccessListener { startListeningIfPaired() }
-            .addOnFailureListener { e ->
-                Log.e("AmanahRemoteService", "Anonymous auth failed: ${e.message}")
+            .addOnSuccessListener {
+                authInProgress = false
+                authRetryCount = 0
+                startListeningIfPaired()
             }
+            .addOnFailureListener { e ->
+                authInProgress = false
+                Log.e("AmanahRemoteService", "Anonymous auth failed: ${e.message}")
+                // Retry auth with exponential backoff (30s, 60s, 120s... max 5min)
+                if (authRetryCount < MAX_AUTH_RETRIES) {
+                    val delayMs = minOf(30_000L * (1L shl authRetryCount.coerceAtMost(3)), 300_000L)
+                    authRetryCount++
+                    Log.i("AmanahRemoteService", "Retrying auth in ${delayMs / 1000}s (attempt $authRetryCount)")
+                    retryHandler.postDelayed({ ensureAuthAndListen() }, delayMs)
+                }
+            }
+    }
+
+    private fun enforceSavedLockState() {
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        val lockActive = prefs.getBoolean("deviceLockActive", false)
+        val blackoutActive = prefs.getBoolean("blackoutActive", false)
+        if (lockActive || blackoutActive) {
+            broadcastLockStateChanged()
+            bringLockOverlayToFront()
+        }
+    }
+
+    private fun enforceSavedDnsPolicy() {
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        val enabled = prefs.getBoolean(DnsFilterVpnService.PREF_KEY_ENABLED, false)
+        if (!enabled) {
+            stopDnsFilteringService()
+            return
+        }
+        if (VpnService.prepare(this) == null) {
+            startDnsFilteringService(DnsFilterVpnService.ACTION_APPLY_POLICY)
+        } else {
+            requestDnsVpnPermission()
+        }
     }
 
     private fun startListeningIfPaired() {
         val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
         val childId = prefs.getString("childDocumentId", null)
         if (childId.isNullOrBlank()) {
+            commandListener?.remove()
+            commandListener = null
+            listeningChildId = null
             Log.d("AmanahRemoteService", "No paired child id found, service is idle")
+            return
+        }
+
+        if (commandListener != null && listeningChildId == childId) {
             return
         }
         claimDeviceOwnership(childId)
@@ -127,10 +222,14 @@ class RemoteCommandService : Service() {
 
     private fun startListeningForCommands(childId: String) {
         commandListener?.remove()
+        listeningChildId = childId
         commandListener = db.collection("children").document(childId)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
                     Log.e("AmanahRemoteService", "Listener error: ${e.message}")
+                    commandListener?.remove()
+                    commandListener = null
+                    listeningChildId = null
                     return@addSnapshotListener
                 }
                 if (snapshot == null || !snapshot.exists()) return@addSnapshotListener
@@ -295,11 +394,22 @@ class RemoteCommandService : Service() {
 
                 val blockAppCmd = commands["blockApp"] as? Map<*, *>
                 if (shouldHandleCommand(blockAppCmd, "blockApp")) {
-                    val cfg = blockAppCmd?.get("value") as? Map<*, *>
-                    val applied = handleBlockAppCommand(cfg)
-                    if (applied) {
+                    val outcome = handleBlockAppCommand(blockAppCmd?.get("value"))
+                    if (outcome.applied) {
+                        val actionText = if (outcome.blocked) "enabled" else "disabled"
+                        val scopeText = if (outcome.scope == "app") "full app block" else "partial isolation (${outcome.scope})"
+                        writeOperationalAlert(
+                            platform = "App Shield",
+                            content = "Parent command $actionText for $scopeText on ${outcome.targetCount} target(s).",
+                            severity = "LOW"
+                        )
                         markCommandStatus(childId, "blockApp", "EXECUTED")
                     } else {
+                        writeOperationalAlert(
+                            platform = "Remote Command",
+                            content = "blockApp command received but no valid package/scope target could be resolved.",
+                            severity = "LOW"
+                        )
                         markCommandStatus(childId, "blockApp", "FAILED")
                     }
                 }
@@ -319,6 +429,37 @@ class RemoteCommandService : Service() {
                         severity = "MEDIUM"
                     )
                     markCommandStatus(childId, "cutInternet", "EXECUTED")
+                }
+
+                val dnsFilteringCmd = commands["dnsFiltering"] as? Map<*, *>
+                if (shouldHandleCommand(dnsFilteringCmd, "dnsFiltering")) {
+                    val cfg = dnsFilteringCmd?.get("value") as? Map<*, *>
+                    val status = handleDnsFilteringCommand(cfg)
+                    markCommandStatus(childId, "dnsFiltering", status)
+                }
+
+                val offlineUnlockCmd = commands["syncOfflineUnlockConfig"] as? Map<*, *>
+                if (shouldHandleCommand(offlineUnlockCmd, "syncOfflineUnlockConfig")) {
+                    val status = handleOfflineUnlockConfigCommand(offlineUnlockCmd?.get("value"))
+                    markCommandStatus(childId, "syncOfflineUnlockConfig", status, clearValue = status == "EXECUTED")
+                }
+
+                val vulnerabilityScanCmd = commands["runVulnerabilityScan"] as? Map<*, *>
+                if (shouldHandleCommand(vulnerabilityScanCmd, "runVulnerabilityScan")) {
+                    val status = handleRunVulnerabilityScanCommand(vulnerabilityScanCmd?.get("value"))
+                    markCommandStatus(childId, "runVulnerabilityScan", status, clearValue = status == "EXECUTED")
+                }
+
+                val visualThresholdCmd = commands["setVisualThresholds"] as? Map<*, *>
+                if (shouldHandleCommand(visualThresholdCmd, "setVisualThresholds")) {
+                    val status = handleVisualThresholdsCommand(visualThresholdCmd?.get("value"))
+                    markCommandStatus(childId, "setVisualThresholds", status, clearValue = status == "EXECUTED")
+                }
+
+                val textThresholdCmd = commands["setTextRuleThresholds"] as? Map<*, *>
+                if (shouldHandleCommand(textThresholdCmd, "setTextRuleThresholds")) {
+                    val status = handleTextRuleThresholdsCommand(textThresholdCmd?.get("value"))
+                    markCommandStatus(childId, "setTextRuleThresholds", status, clearValue = status == "EXECUTED")
                 }
 
                 val blockCamMicCmd = commands["blockCameraAndMic"] as? Map<*, *>
@@ -349,6 +490,336 @@ class RemoteCommandService : Service() {
                     markCommandStatus(childId, "notifyParent", "EXECUTED", clearValue = true)
                 }
             }
+    }
+
+    private fun runNetworkPulse() {
+        ensureWifiAvailability()
+
+        if (!hasValidatedInternetConnection()) {
+            val now = System.currentTimeMillis()
+            if (now - lastNetworkRecoveryAt >= NETWORK_RECOVERY_BACKOFF_MS) {
+                lastNetworkRecoveryAt = now
+                ensureAuthAndListen()
+            }
+            return
+        }
+
+        flushPendingOfflineUnlockState()
+
+        if (auth.currentUser == null) {
+            ensureAuthAndListen()
+            return
+        }
+
+        startListeningIfPaired()
+    }
+
+    private fun ensureWifiAvailability() {
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        if (prefs.getBoolean("internetCutRequested", false)) {
+            return
+        }
+
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+        if (wifiManager.isWifiEnabled) {
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        if (now - lastWifiEnableAttemptAt < WIFI_ENABLE_BACKOFF_MS) {
+            return
+        }
+        lastWifiEnableAttemptAt = now
+
+        try {
+            @Suppress("DEPRECATION")
+            val requestAccepted = wifiManager.setWifiEnabled(true)
+            if (requestAccepted) {
+                Log.i("AmanahRemoteService", "Wi-Fi enable request accepted.")
+            } else {
+                Log.w("AmanahRemoteService", "Wi-Fi enable request rejected by OS policy.")
+            }
+        } catch (se: SecurityException) {
+            Log.w("AmanahRemoteService", "Wi-Fi enable blocked by permissions/policy: ${se.message}")
+        } catch (e: Exception) {
+            Log.w("AmanahRemoteService", "Wi-Fi enable attempt failed: ${e.message}")
+        }
+    }
+
+    private fun hasValidatedInternetConnection(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val activeNetwork = cm.activeNetwork ?: return false
+        val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    private fun flushPendingOfflineUnlockState() {
+        if (offlineUnlockSyncInFlight) return
+        if (!OfflineUnlockManager.hasPendingSync(this)) return
+
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val childId = prefs.getString("childDocumentId", null) ?: return
+        val now = Timestamp.now()
+
+        val updates = hashMapOf<String, Any>(
+            "deviceLocked" to false,
+            "commands.lockDevice.value" to false,
+            "commands.lockDevice.status" to "OFFLINE_UNLOCKED",
+            "commands.lockDevice.handledAt" to now,
+            "commands.lockscreenBlackout.value" to mapOf(
+                "enabled" to false,
+                "message" to "",
+                "source" to "offline_emergency_unlock"
+            ),
+            "commands.lockscreenBlackout.status" to "OFFLINE_UNLOCKED",
+            "commands.lockscreenBlackout.handledAt" to now
+        )
+
+        offlineUnlockSyncInFlight = true
+        db.collection("children").document(childId)
+            .update(updates)
+            .addOnSuccessListener {
+                offlineUnlockSyncInFlight = false
+                OfflineUnlockManager.markPendingSyncFlushed(this)
+                writeOperationalAlert(
+                    platform = "Offline Unlock",
+                    content = "Offline emergency unlock state has been synchronized to cloud.",
+                    severity = "LOW"
+                )
+            }
+            .addOnFailureListener { e ->
+                offlineUnlockSyncInFlight = false
+                Log.w("AmanahRemoteService", "Pending offline unlock sync failed: ${e.message}")
+            }
+    }
+
+    private fun handleDnsFilteringCommand(config: Map<*, *>?): String {
+        if (config == null) return "FAILED"
+
+        val enabled = config["enabled"] as? Boolean ?: false
+        val mode = config["mode"]?.toString()?.lowercase(Locale.getDefault()) ?: "family"
+        val domains = parseDnsDomains(config["domains"])
+
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean(DnsFilterVpnService.PREF_KEY_ENABLED, enabled)
+            .putString(
+                DnsFilterVpnService.PREF_KEY_MODE,
+                when (mode) {
+                    "strict" -> "strict"
+                    "custom" -> "custom"
+                    "sandbox" -> "sandbox"
+                    else -> "family"
+                }
+            )
+            .putStringSet(DnsFilterVpnService.PREF_KEY_DOMAINS, domains)
+            .apply()
+
+        if (!enabled) {
+            stopDnsFilteringService()
+            writeOperationalAlert(
+                platform = "DNS Filter",
+                content = "DNS-level filtering has been disabled by parent command.",
+                severity = "LOW"
+            )
+            return "EXECUTED"
+        }
+
+        if (VpnService.prepare(this) == null) {
+            startDnsFilteringService(DnsFilterVpnService.ACTION_APPLY_POLICY)
+            writeOperationalAlert(
+                platform = "DNS Filter",
+                content = if (mode == "sandbox")
+                    "DNS sandbox AI has been enabled (automatic domain decisions without waiting for parent approval)."
+                else
+                    "DNS-level filtering has been enabled and activated on child device.",
+                severity = "LOW"
+            )
+            return "EXECUTED"
+        }
+
+        requestDnsVpnPermission()
+        writeOperationalAlert(
+            platform = "DNS Filter",
+            content = "DNS filtering requested, but one-time VPN approval is required on child device.",
+            severity = "MEDIUM"
+        )
+        return "REQUESTED"
+    }
+
+    private fun handleOfflineUnlockConfigCommand(rawConfig: Any?): String {
+        val applied = OfflineUnlockManager.applyConfig(this, rawConfig)
+        if (!applied) {
+            writeOperationalAlert(
+                platform = "Offline Unlock",
+                content = "Offline unlock sync command failed due to invalid payload.",
+                severity = "MEDIUM"
+            )
+            return "FAILED"
+        }
+
+        val remaining = OfflineUnlockManager.backupCodesRemaining(this)
+        writeOperationalAlert(
+            platform = "Offline Unlock",
+            content = "Offline emergency unlock has been provisioned on child device (backup codes: $remaining).",
+            severity = "LOW"
+        )
+        return "EXECUTED"
+    }
+
+    private fun handleRunVulnerabilityScanCommand(rawConfig: Any?): String {
+        val shouldRun = when (rawConfig) {
+            is Boolean -> rawConfig
+            is Map<*, *> -> rawConfig["enabled"] as? Boolean ?: true
+            null -> true
+            else -> true
+        }
+        if (!shouldRun) return "EXECUTED"
+
+        return try {
+            val intent = Intent(this, VulnerabilityScannerService::class.java).apply {
+                action = VulnerabilityScannerService.ACTION_SCAN_NOW
+            }
+            startService(intent)
+            writeOperationalAlert(
+                platform = "Vulnerability Scanner",
+                content = "On-device vulnerability scan triggered by parent command.",
+                severity = "LOW"
+            )
+            "EXECUTED"
+        } catch (e: Exception) {
+            Log.w("AmanahRemoteService", "Vulnerability scan trigger failed: ${e.message}")
+            writeOperationalAlert(
+                platform = "Vulnerability Scanner",
+                content = "Failed to start on-device vulnerability scanner.",
+                severity = "MEDIUM"
+            )
+            "FAILED"
+        }
+    }
+
+    private fun handleVisualThresholdsCommand(rawConfig: Any?): String {
+        return try {
+            val applied = SecurityCortex.applyVisualThresholdOverrides(this, rawConfig)
+            if (!applied) {
+                writeOperationalAlert(
+                    platform = "Visual Engine",
+                    content = "Visual threshold command failed due to invalid payload format.",
+                    severity = "MEDIUM"
+                )
+                "FAILED"
+            } else {
+                val resetMode = (rawConfig as? Map<*, *>)?.get("resetToDefault") == true
+                writeOperationalAlert(
+                    platform = "Visual Engine",
+                    content = if (resetMode) {
+                        "Visual model thresholds were reset to secure defaults."
+                    } else {
+                        "Visual model thresholds were updated and applied on child device."
+                    },
+                    severity = "LOW"
+                )
+                "EXECUTED"
+            }
+        } catch (e: Exception) {
+            Log.w("AmanahRemoteService", "Visual threshold command failed: ${e.message}")
+            writeOperationalAlert(
+                platform = "Visual Engine",
+                content = "Failed to apply visual threshold command on child device.",
+                severity = "MEDIUM"
+            )
+            "FAILED"
+        }
+    }
+
+    private fun handleTextRuleThresholdsCommand(rawConfig: Any?): String {
+        return try {
+            val applied = SecurityCortex.applyTextRuleThresholdOverrides(this, rawConfig)
+            if (!applied) {
+                writeOperationalAlert(
+                    platform = "Text Rule Engine",
+                    content = "Text rule-engine threshold command failed due to invalid payload format.",
+                    severity = "MEDIUM"
+                )
+                "FAILED"
+            } else {
+                val resetMode = (rawConfig as? Map<*, *>)?.get("resetToDefault") == true
+                writeOperationalAlert(
+                    platform = "Text Rule Engine",
+                    content = if (resetMode) {
+                        "Text rule-engine thresholds were reset to secure defaults."
+                    } else {
+                        "Text rule-engine thresholds were updated and applied on child device."
+                    },
+                    severity = "LOW"
+                )
+                "EXECUTED"
+            }
+        } catch (e: Exception) {
+            Log.w("AmanahRemoteService", "Text threshold command failed: ${e.message}")
+            writeOperationalAlert(
+                platform = "Text Rule Engine",
+                content = "Failed to apply text threshold command on child device.",
+                severity = "MEDIUM"
+            )
+            "FAILED"
+        }
+    }
+
+    private fun parseDnsDomains(raw: Any?): Set<String> {
+        val tokens = when (raw) {
+            is List<*> -> raw.mapNotNull { it?.toString() }
+            is Array<*> -> raw.mapNotNull { it?.toString() }
+            is String -> raw.split(',', '\n', ';').map { it.trim() }
+            else -> emptyList()
+        }
+
+        return tokens.mapNotNull { token ->
+            val normalized = token.trim()
+                .lowercase(Locale.getDefault())
+                .removePrefix("https://")
+                .removePrefix("http://")
+                .removePrefix("www.")
+                .substringBefore('/')
+                .removePrefix("*.")
+                .trim('.')
+            if (normalized.isBlank()) null
+            else if (!normalized.matches(Regex("^[a-z0-9.-]+\$"))) null
+            else normalized
+        }.take(200).toSet()
+    }
+
+    private fun startDnsFilteringService(action: String) {
+        val intent = Intent(this, DnsFilterVpnService::class.java).apply { this.action = action }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    private fun stopDnsFilteringService() {
+        try {
+            val stopIntent = Intent(this, DnsFilterVpnService::class.java).apply {
+                action = DnsFilterVpnService.ACTION_STOP_POLICY
+            }
+            startService(stopIntent)
+        } catch (_: Exception) {
+        }
+        stopService(Intent(this, DnsFilterVpnService::class.java))
+    }
+
+    private fun requestDnsVpnPermission() {
+        try {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                putExtra("REQUEST_DNS_VPN_PERMISSION", true)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.w("AmanahRemoteService", "Failed to request DNS VPN permission UI: ${e.message}")
+        }
     }
 
     private fun shouldHandleCommand(cmd: Map<*, *>?, key: String): Boolean {
@@ -410,9 +881,32 @@ class RemoteCommandService : Service() {
     }
 
     private fun bringLockOverlayToFront() {
-        // Do not open MainActivity while locking.
-        // The accessibility overlay is the only lock surface so the child app UI never appears.
         broadcastLockStateChanged()
+        // If accessibility service isn't active, launch MainActivity with FORCE_LOCK as fallback
+        if (!isAccessibilityServiceEnabled()) {
+            try {
+                val intent = Intent(this, MainActivity::class.java).apply {
+                    // singleTask + SINGLE_TOP ensures onNewIntent() is called, no recreation
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    putExtra("FORCE_LOCK", true)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Log.w("AmanahRemoteService", "Failed to launch lock overlay activity: ${e.message}")
+            }
+        }
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        return try {
+            val enabledServices = Settings.Secure.getString(
+                contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: ""
+            enabledServices.contains("com.amanah.child/.services.AmanahAccessibilityService")
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun syncChildLockState(childId: String) {
@@ -508,39 +1002,211 @@ class RemoteCommandService : Service() {
             .addOnFailureListener { e -> Log.w("AmanahRemoteService", "Failed to upload screenshot alert: ${e.message}") }
     }
 
-    private fun handleBlockAppCommand(config: Map<*, *>?): Boolean {
-        if (config == null) return false
-        val blocked = when (val flag = config["blocked"] ?: config["isBlocked"]) {
-            is Boolean -> flag
-            is String -> flag.equals("true", ignoreCase = true)
-            else -> false
+    private fun handleBlockAppCommand(rawValue: Any?): BlockAppCommandResult {
+        val locale = Locale.getDefault()
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+
+        var blocked = false
+        var appIdRaw = ""
+        var appNameRaw = ""
+        var scope = "app"
+        var patterns = emptySet<String>()
+
+        when (rawValue) {
+            is Map<*, *> -> {
+                blocked = when (val flag = rawValue["blocked"] ?: rawValue["isBlocked"]) {
+                    is Boolean -> flag
+                    is String -> flag.equals("true", ignoreCase = true)
+                    else -> false
+                }
+                appIdRaw = rawValue["appId"]?.toString()?.trim()?.lowercase(locale) ?: ""
+                appNameRaw = rawValue["appName"]?.toString()?.trim()?.lowercase(locale) ?: ""
+                scope = normalizeBlockScope(rawValue["scope"]?.toString())
+                patterns = parsePolicyPatterns(
+                    rawValue["patterns"] ?: rawValue["keywords"] ?: rawValue["surfaceHints"]
+                )
+            }
+            is Boolean -> {
+                blocked = rawValue
+                appIdRaw = prefs.getString("lastForegroundPackage", "")?.trim()?.lowercase(locale) ?: ""
+            }
+            is String -> {
+                blocked = true
+                appIdRaw = rawValue.trim().lowercase(locale)
+            }
+            else -> return BlockAppCommandResult(applied = false)
         }
-        val appIdRaw = config["appId"]?.toString()?.trim()?.lowercase(Locale.getDefault()) ?: ""
-        val appNameRaw = config["appName"]?.toString()?.trim()?.lowercase(Locale.getDefault()) ?: ""
-        val packageAliases = mapOf(
+
+        val tokens = resolveBlockedTokens(appIdRaw, appNameRaw)
+        if (tokens.isEmpty()) {
+            return BlockAppCommandResult(applied = false)
+        }
+
+        val blockedApps = prefs.getStringSet(PREF_BLOCKED_APPS, emptySet())?.toMutableSet() ?: mutableSetOf()
+        val partialPolicies = prefs.getStringSet(PREF_PARTIAL_POLICIES, emptySet())?.toMutableSet() ?: mutableSetOf()
+
+        if (scope == "app") {
+            if (blocked) {
+                blockedApps.addAll(tokens)
+            } else {
+                blockedApps.removeAll(tokens)
+                removePartialPolicies(partialPolicies, tokens, null)
+            }
+        } else {
+            upsertPartialPolicies(partialPolicies, tokens, scope, patterns, blocked)
+        }
+
+        prefs.edit()
+            .putStringSet(PREF_BLOCKED_APPS, blockedApps)
+            .putStringSet(PREF_PARTIAL_POLICIES, partialPolicies)
+            .apply()
+
+        return BlockAppCommandResult(
+            applied = true,
+            blocked = blocked,
+            scope = scope,
+            targetCount = tokens.size
+        )
+    }
+
+    private fun normalizeBlockScope(rawScope: String?): String {
+        val scope = rawScope?.trim()?.lowercase(Locale.getDefault()).orEmpty()
+        return when (scope) {
+            "", "app", "full", "global", "all" -> "app"
+            "messaging", "chat", "messages", "dm", "direct_messages" -> "messaging"
+            "private", "private_chat", "private_messages", "inbox" -> "private_chat"
+            "rooms", "room", "groups", "group", "channels", "voice_rooms" -> "rooms"
+            "comments", "comment", "replies", "reply" -> "comments"
+            else -> "app"
+        }
+    }
+
+    private fun parsePolicyPatterns(raw: Any?): Set<String> {
+        val tokens = when (raw) {
+            is List<*> -> raw.mapNotNull { it?.toString() }
+            is Array<*> -> raw.mapNotNull { it?.toString() }
+            is String -> raw.split(',', '\n', ';', '|')
+            else -> emptyList()
+        }
+        return tokens.mapNotNull { token ->
+            val normalized = token
+                .trim()
+                .lowercase(Locale.getDefault())
+                .replace(PARTIAL_POLICY_DELIM, " ")
+                .replace(PARTIAL_PATTERN_DELIM, " ")
+                .replace(Regex("\\s+"), " ")
+            if (normalized.length < 2 || normalized.length > 64) null else normalized
+        }.take(24).toSet()
+    }
+
+    private fun upsertPartialPolicies(
+        store: MutableSet<String>,
+        tokens: Set<String>,
+        scope: String,
+        patterns: Set<String>,
+        blocked: Boolean
+    ) {
+        removePartialPolicies(store, tokens, scope)
+        if (!blocked) return
+        for (token in tokens) {
+            store.add(encodePartialPolicy(token, scope, patterns))
+        }
+    }
+
+    private fun removePartialPolicies(
+        store: MutableSet<String>,
+        tokens: Set<String>,
+        scope: String?
+    ) {
+        val normalizedTokens = tokens.map { it.lowercase(Locale.getDefault()) }.toSet()
+        val iterator = store.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            val parsed = decodePartialPolicy(entry) ?: continue
+            if (parsed.first !in normalizedTokens) continue
+            if (scope == null || parsed.second == scope) {
+                iterator.remove()
+            }
+        }
+    }
+
+    private fun encodePartialPolicy(token: String, scope: String, patterns: Set<String>): String {
+        val normalizedPatterns = patterns
+            .map { it.replace(PARTIAL_PATTERN_DELIM, " ").trim() }
+            .filter { it.isNotBlank() }
+        return listOf(
+            token.lowercase(Locale.getDefault()),
+            scope.lowercase(Locale.getDefault()),
+            normalizedPatterns.joinToString(PARTIAL_PATTERN_DELIM)
+        ).joinToString(PARTIAL_POLICY_DELIM)
+    }
+
+    private fun decodePartialPolicy(entry: String): Triple<String, String, Set<String>>? {
+        val parts = entry.split(PARTIAL_POLICY_DELIM)
+        if (parts.size < 2) return null
+        val token = parts[0].trim().lowercase(Locale.getDefault())
+        val scope = parts[1].trim().lowercase(Locale.getDefault())
+        if (token.isBlank() || scope.isBlank()) return null
+        val patterns = if (parts.size >= 3) {
+            parts[2].split(PARTIAL_PATTERN_DELIM)
+                .map { it.trim().lowercase(Locale.getDefault()) }
+                .filter { it.isNotBlank() }
+                .toSet()
+        } else {
+            emptySet()
+        }
+        return Triple(token, scope, patterns)
+    }
+
+    private fun resolveBlockedTokens(appIdRaw: String, appNameRaw: String): Set<String> {
+        val aliases = mapOf(
             "tiktok" to "com.zhiliaoapp.musically",
-            "discord" to "com.discord",
+            "tik tok" to "com.zhiliaoapp.musically",
             "instagram" to "com.instagram.android",
-            "snapchat" to "com.snapchat.android",
-            "telegram" to "org.telegram.messenger",
             "youtube" to "com.google.android.youtube",
             "whatsapp" to "com.whatsapp",
+            "telegram" to "org.telegram.messenger",
+            "discord" to "com.discord",
+            "snapchat" to "com.snapchat.android",
             "facebook" to "com.facebook.katana",
             "roblox" to "com.roblox.client"
         )
-        val token = when {
-            appIdRaw.contains(".") -> appIdRaw
-            appNameRaw.isNotEmpty() && packageAliases.containsKey(appNameRaw) -> packageAliases[appNameRaw].orEmpty()
-            appNameRaw.isNotEmpty() -> appNameRaw
-            else -> appIdRaw
+        val tokens = mutableSetOf<String>()
+        if (appIdRaw.isNotBlank()) tokens.add(appIdRaw)
+        if (appNameRaw.isNotBlank()) tokens.add(appNameRaw)
+        aliases[appIdRaw]?.let { tokens.add(it) }
+        aliases[appNameRaw]?.let { tokens.add(it) }
+        resolvePackageFromInstalledApps(appNameRaw)?.let { tokens.add(it) }
+        if (!appIdRaw.contains('.')) {
+            resolvePackageFromInstalledApps(appIdRaw)?.let { tokens.add(it) }
         }
-        if (token.isEmpty()) return false
+        return tokens.map { it.trim().lowercase(Locale.getDefault()) }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
 
-        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
-        val currentSet = prefs.getStringSet("blockedApps", emptySet())?.toMutableSet() ?: mutableSetOf()
-        if (blocked) currentSet.add(token) else currentSet.remove(token)
-        prefs.edit().putStringSet("blockedApps", currentSet).apply()
-        return true
+    private fun resolvePackageFromInstalledApps(rawName: String): String? {
+        val normalized = rawName.trim().lowercase(Locale.getDefault())
+        if (normalized.isBlank()) return null
+        if (normalized.contains('.')) return normalized
+        return try {
+            packageManager.getInstalledApplications(0)
+                .firstOrNull { app ->
+                    val label = try {
+                        packageManager.getApplicationLabel(app)
+                            .toString()
+                            .trim()
+                            .lowercase(Locale.getDefault())
+                    } catch (_: Exception) {
+                        ""
+                    }
+                    label == normalized || label.contains(normalized)
+                }
+                ?.packageName
+                ?.lowercase(Locale.getDefault())
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun writeOperationalAlert(platform: String, content: String, severity: String) {
@@ -567,3 +1233,4 @@ class RemoteCommandService : Service() {
             }
     }
 }
+
