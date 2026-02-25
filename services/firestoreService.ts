@@ -28,7 +28,7 @@ import {
   signInWithPhoneNumber,
   signOut,
 } from 'firebase/auth';
-import { auth, db } from './firebaseConfig';
+import { auth, canUseMockData, db } from './firebaseConfig';
 import {
   Child,
   ParentAccount,
@@ -43,6 +43,7 @@ import {
   DeviceCommandAudit,
   SystemPatch,
   ParentMessage,
+  ChildSignalEvent,
 } from '../types';
 import { ValidationService } from './validationService';
 import { isLockCommand, isLockEnableRequest } from './lockCommandPolicy';
@@ -79,9 +80,51 @@ const PLAYBOOKS_COLLECTION = 'playbooks';
 const CUSTODY_COLLECTION = 'custody';
 const AUDIT_LOGS_COLLECTION = 'auditLogs';
 const SYSTEM_PATCHES_COLLECTION = 'systemPatches';
+const CHILD_SIGNAL_EVENTS_COLLECTION = 'childSignalEvents';
+const PSYCH_FORECAST_SNAPSHOTS_COLLECTION = 'psychForecastSnapshots';
 const PAIRING_REQUESTS_SUBCOLLECTION = 'pairingRequests';
 const PAIRING_KEYS_COLLECTION = 'pairingKeys';
 const PARENT_MESSAGES_COLLECTION = 'parentMessages';
+
+export interface PsychForecastSnapshotInput {
+  childId: string;
+  childIds?: string[];
+  childName: string;
+  generatedAt: string;
+  sevenDayTop?: {
+    scenarioId: string;
+    riskScore: number;
+    probability: number;
+    confidence: number;
+    trend: 'rising' | 'stable' | 'cooling';
+    explanationAr: string;
+    explanationEn: string;
+  };
+  thirtyDayTop?: {
+    scenarioId: string;
+    riskScore: number;
+    probability: number;
+    confidence: number;
+    trend: 'rising' | 'stable' | 'cooling';
+    explanationAr: string;
+    explanationEn: string;
+  };
+  contextSummary: {
+    analyzedMessages: number;
+    analyzedAlerts: number;
+    recencyWeight: number;
+    escalationIndex: number;
+    pressureIndex: number;
+    repeatedTerms: string[];
+    topPatternIds: string[];
+  };
+  sourceCoverage?: {
+    sourceCount: number;
+    depthScore: number;
+    counts: Record<string, number>;
+    topDriversEn: string[];
+  };
+}
 
 /** Retry helper with exponential backoff for transient network failures */
 const retryWithBackoff = async <T>(
@@ -804,6 +847,8 @@ const isIndexRequiredError = (error: any): boolean => {
 const isMockTaggedData = (data: any): boolean =>
   data?.mockTag === 'AMANAH_FAKE_DATA' || data?.isMock === true;
 
+const shouldExcludeMockData = (data: any): boolean => !canUseMockData() && isMockTaggedData(data);
+
 const claimChildDeviceOwnership = async (childId: string, authUid: string): Promise<boolean> => {
   if (!db || !childId || !authUid) return false;
   const childRef = doc(db, CHILDREN_COLLECTION, childId);
@@ -1095,7 +1140,7 @@ export const subscribeToAlerts = (
       const alerts = snapshot.docs
         .map((d) => {
           const rawData = d.data();
-          if (isMockTaggedData(rawData)) return null;
+          if (shouldExcludeMockData(rawData)) return null;
           return {
             id: d.id,
             ...sanitizeData(rawData),
@@ -1122,7 +1167,7 @@ export const subscribeToAlerts = (
           const fallbackAlerts = snap.docs
             .map((d) => {
               const raw = d.data();
-              if (isMockTaggedData(raw)) return null;
+              if (shouldExcludeMockData(raw)) return null;
               return { id: d.id, ...sanitizeData(raw) } as any;
             })
             .filter(Boolean)
@@ -1146,6 +1191,113 @@ export const subscribeToAlerts = (
   return () => unsubscribe();
 };
 
+export const saveChildSignalEventToDB = async (
+  parentId: string,
+  event: Partial<ChildSignalEvent>
+): Promise<string | null> => {
+  if (!db || !parentId) return null;
+  const content = String(event.content || '').trim();
+  const eventType = String(event.eventType || '').trim();
+  const source = String(event.source || '').trim();
+  if (!content || !eventType || !source) return null;
+
+  try {
+    const payload = {
+      ...event,
+      parentId,
+      eventType,
+      source,
+      content: content.slice(0, 3000),
+      normalizedContent: String(event.normalizedContent || '').slice(0, 3000),
+      timestamp: Timestamp.now(),
+    };
+    const docRef = await addDoc(collection(db, CHILD_SIGNAL_EVENTS_COLLECTION), payload);
+    return docRef.id;
+  } catch (error) {
+    console.warn('Failed to save child signal event:', error);
+    return null;
+  }
+};
+
+export const subscribeToChildSignalEvents = (
+  parentId: string,
+  callback: (events: ChildSignalEvent[]) => void
+) => {
+  if (!db || !parentId) return () => { };
+
+  const q = query(
+    collection(db, CHILD_SIGNAL_EVENTS_COLLECTION),
+    where('parentId', '==', parentId),
+    orderBy('timestamp', 'desc'),
+    limit(300)
+  );
+
+  let unsubscribe: () => void = () => { };
+
+  unsubscribe = onSnapshot(
+    q,
+    (snapshot) => {
+      const events = snapshot.docs
+        .map((d) => {
+          const rawData = d.data();
+          if (shouldExcludeMockData(rawData)) return null;
+          return {
+            id: d.id,
+            ...sanitizeData(rawData),
+            timestamp: rawData.timestamp?.toDate?.() || new Date(),
+          } as ChildSignalEvent;
+        })
+        .filter(Boolean) as ChildSignalEvent[];
+      callback(events);
+    },
+    (err) => {
+      if (isPermissionDeniedError(err)) {
+        console.warn('Firestore child signal events denied by rules:', err);
+        callback([]);
+        return;
+      }
+      if (!isIndexRequiredError(err)) {
+        console.warn('Firestore child signal events error:', err);
+      }
+      const simpleQ = query(
+        collection(db, CHILD_SIGNAL_EVENTS_COLLECTION),
+        where('parentId', '==', parentId)
+      );
+      unsubscribe = onSnapshot(
+        simpleQ,
+        (snap) => {
+          const fallbackEvents = snap.docs
+            .map((d) => {
+              const raw = d.data();
+              if (shouldExcludeMockData(raw)) return null;
+              return {
+                id: d.id,
+                ...sanitizeData(raw),
+                timestamp: raw.timestamp?.toDate?.() || new Date(raw.timestamp || Date.now()),
+              } as ChildSignalEvent;
+            })
+            .filter(Boolean)
+            .sort(
+              (a: ChildSignalEvent, b: ChildSignalEvent) =>
+                new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            );
+          callback(fallbackEvents);
+        },
+        (fallbackErr) => {
+          if (isPermissionDeniedError(fallbackErr)) {
+            console.warn('Firestore child signal events fallback denied by rules:', fallbackErr);
+          } else {
+            console.warn('Firestore child signal events fallback failed:', fallbackErr);
+          }
+          callback([]);
+        }
+      );
+    }
+  );
+
+  return () => unsubscribe();
+};
+
 export const subscribeToChildren = (parentId: string, callback: (children: Child[]) => void) => {
   if (!db || !parentId) return () => { };
   const q = query(collection(db, CHILDREN_COLLECTION), where('parentId', '==', parentId));
@@ -1154,7 +1306,7 @@ export const subscribeToChildren = (parentId: string, callback: (children: Child
       .map(
         (d) => {
           const raw = d.data();
-          if (isMockTaggedData(raw)) return null;
+          if (shouldExcludeMockData(raw)) return null;
           return {
             id: d.id,
             ...sanitizeData(raw),
@@ -1744,6 +1896,57 @@ export const fetchSystemPatches = async (parentId: string): Promise<SystemPatch[
       codeSnippet: row.codeSnippet || '',
     } satisfies SystemPatch;
   });
+};
+
+export const savePsychForecastSnapshot = async (
+  parentId: string,
+  payload: PsychForecastSnapshotInput
+): Promise<string | null> => {
+  if (!db || !parentId || !payload?.childId) return null;
+
+  try {
+    const snapshotPayload = sanitizeData(payload);
+    const sevenDayRisk = Number(payload.sevenDayTop?.riskScore || 0);
+    const thirtyDayRisk = Number(payload.thirtyDayTop?.riskScore || 0);
+    const maxRisk = Math.max(sevenDayRisk, thirtyDayRisk);
+    if (!Number.isFinite(maxRisk) || maxRisk < 35) {
+      return null;
+    }
+
+    const generatedAtTs = new Date(payload.generatedAt || Date.now());
+    const generatedAt = Number.isFinite(generatedAtTs.getTime()) ? Timestamp.fromDate(generatedAtTs) : Timestamp.now();
+
+    const row = {
+      parentId,
+      childId: String(payload.childId || ''),
+      childIds: Array.isArray(payload.childIds) ? payload.childIds.slice(0, 20) : [],
+      childName: String(payload.childName || ''),
+      topScenario7d: payload.sevenDayTop?.scenarioId || null,
+      topRisk7d: sevenDayRisk,
+      topScenario30d: payload.thirtyDayTop?.scenarioId || null,
+      topRisk30d: thirtyDayRisk,
+      trend7d: payload.sevenDayTop?.trend || null,
+      trend30d: payload.thirtyDayTop?.trend || null,
+      pressureIndex: Number(payload.contextSummary?.pressureIndex || 0),
+      escalationIndex: Number(payload.contextSummary?.escalationIndex || 0),
+      recencyWeight: Number(payload.contextSummary?.recencyWeight || 0),
+      sourceCount: Number(payload.sourceCoverage?.sourceCount || 0),
+      sourceDepthScore: Number(payload.sourceCoverage?.depthScore || 0),
+      sourceTopDrivers: Array.isArray(payload.sourceCoverage?.topDriversEn)
+        ? payload.sourceCoverage?.topDriversEn.slice(0, 10)
+        : [],
+      generatedAt,
+      createdAt: Timestamp.now(),
+      source: 'psych_forecast_v1',
+      payload: snapshotPayload,
+    };
+
+    const docRef = await addDoc(collection(db, PSYCH_FORECAST_SNAPSHOTS_COLLECTION), row);
+    return docRef.id;
+  } catch (error) {
+    console.error('Failed to save psych forecast snapshot:', error);
+    return null;
+  }
 };
 
 // SOS Emergency Alert

@@ -1188,9 +1188,6 @@ object SecurityCortex {
             injuryCandidate != null &&
                 injuryCandidate.severity == "CRITICAL" &&
                 injuryCandidate.score >= injuryFastPathScoreThreshold
-        if (LEGACY_VISUAL_SENTINEL_PROFILE && strongLegacyInjury) {
-            return injuryCandidate
-        }
 
         val violenceSceneCandidate = if (isViolenceSceneReady) {
             runViolenceSceneModel(bitmap)
@@ -1335,12 +1332,24 @@ object SecurityCortex {
             return violenceSceneCandidate
         }
 
-        if (!LEGACY_VISUAL_SENTINEL_PROFILE &&
-            injuryCandidate != null &&
-            injuryCandidate.severity == "CRITICAL" &&
-            injuryCandidate.score >= injuryFastPathScoreThreshold
-        ) {
-            return injuryCandidate
+        if (injuryCandidate != null) {
+            val allowStandaloneInjury = shouldTrustStandaloneInjuryCandidate(injuryCandidate)
+            if (allowStandaloneInjury) {
+                if (LEGACY_VISUAL_SENTINEL_PROFILE && strongLegacyInjury) {
+                    return injuryCandidate
+                }
+                if (!LEGACY_VISUAL_SENTINEL_PROFILE &&
+                    injuryCandidate.severity == "CRITICAL" &&
+                    injuryCandidate.score >= injuryFastPathScoreThreshold
+                ) {
+                    return injuryCandidate
+                }
+            } else {
+                Log.i(
+                    "SecurityCortex",
+                    "Standalone injury candidate suppressed by anti-false-positive guard."
+                )
+            }
         }
 
         return AnalysisResult(
@@ -1351,6 +1360,80 @@ object SecurityCortex {
             reasonAr = "لم يتم رصد إشارات بصرية خطرة.",
             reasonEn = "No risky visual indicators were detected."
         )
+    }
+
+    private fun shouldTrustStandaloneInjuryCandidate(candidate: AnalysisResult): Boolean {
+        if (!candidate.isDanger || !candidate.category.equals(AlertCategory.VIOLENCE, ignoreCase = true)) {
+            return false
+        }
+        if (!candidate.severity.equals("CRITICAL", ignoreCase = true)) {
+            return false
+        }
+        if (candidate.score < injuryFastPathScoreThreshold) {
+            return false
+        }
+        val isInjuryHeuristic = candidate.matchedSignals.any {
+            it.contains("detector=injury_heuristic", ignoreCase = true)
+        }
+        if (!isInjuryHeuristic) {
+            return true
+        }
+
+        val clusters = extractSignalFloat(candidate.matchedSignals, "clusters")
+        val ratio = extractSignalFloat(candidate.matchedSignals, "dangerRatio")
+        val strongRedShare = extractSignalFloat(candidate.matchedSignals, "strongRedShare")
+        val darkShare = extractSignalFloat(candidate.matchedSignals, "darkShare")
+        val edgeShare = extractSignalFloat(candidate.matchedSignals, "edgeShare")
+        val topShare = extractSignalFloat(candidate.matchedSignals, "topShare")
+        val components = extractSignalFloat(candidate.matchedSignals, "components")
+        val maxComponent = extractSignalFloat(candidate.matchedSignals, "maxComponent")
+
+        val wallpaperLikePattern =
+            (
+                ratio >= 0.34f &&
+                    clusters >= 8f &&
+                    strongRedShare >= 0.26f &&
+                    darkShare < 0.28f &&
+                    (components >= 4f || maxComponent <= 5f)
+                ) ||
+                (
+                    ratio >= 0.42f &&
+                        clusters <= 22f &&
+                        strongRedShare >= 0.24f &&
+                        darkShare < 0.30f &&
+                        topShare in 0.12f..0.62f
+                    )
+        if (wallpaperLikePattern) {
+            return false
+        }
+
+        val hasStrongInjuryStructure =
+            maxComponent >= 4f &&
+                edgeShare >= 0.36f &&
+                darkShare >= 0.16f &&
+                ratio >= 0.12f
+
+        if (!hasStrongInjuryStructure) {
+            return false
+        }
+
+        if (isViolenceSceneReady) {
+            // If scene-model is available yet no scene threat was produced, require extra strictness.
+            val crossModelStrictPass =
+                candidate.score >= 0.96f &&
+                    edgeShare >= 0.40f &&
+                    darkShare >= 0.18f
+            if (!crossModelStrictPass) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private fun extractSignalFloat(signals: List<String>, key: String): Float {
+        val prefix = "$key="
+        val raw = signals.firstOrNull { it.startsWith(prefix, ignoreCase = true) } ?: return 0f
+        return raw.substringAfter("=", "").trim().toFloatOrNull() ?: 0f
     }
 
     private data class NsfwModelRun(
@@ -1877,6 +1960,28 @@ object SecurityCortex {
                     satVariance < 230f
             val lowTextureHighDensityPattern =
                 clusters >= 8 && dangerRatio >= 0.24f && edgeShare < 0.22f && darkShare < 0.12f
+            // Launcher wallpapers (red/maroon gradients) can trigger very high ratio+cluster counts
+            // while lacking the darkness/edge profile usually present in real injury evidence.
+            val ultraDenseWarmWallpaperPattern =
+                dangerRatio >= 0.40f &&
+                    clusters >= 12 &&
+                    darkShare < 0.16f &&
+                    edgeShare < 0.40f
+            val contiguousWarmMassPattern =
+                dangerRatio >= 0.34f &&
+                    clusters >= 10 &&
+                    componentCount <= 3 &&
+                    maxComponentCells >= 8 &&
+                    darkShare < 0.18f &&
+                    edgeShare < 0.42f
+            val warmWallpaperWithIconsPattern =
+                dangerRatio >= 0.36f &&
+                    clusters >= 10 &&
+                    strongRedShare >= 0.45f &&
+                    darkShare < 0.22f &&
+                    satVariance < 420f &&
+                    valueVarianceGlobal < 520f &&
+                    (componentCount >= 4 || maxComponentCells <= 4)
             if (headerLikeUiPattern) {
                 if (scaled !== bitmap) {
                     scaled.recycle()
@@ -1889,7 +1994,10 @@ object SecurityCortex {
                 fragmentedHighClusterUiPattern ||
                 broadWarmBackgroundPattern ||
                 uniformWarmUiPattern ||
-                lowTextureHighDensityPattern
+                lowTextureHighDensityPattern ||
+                ultraDenseWarmWallpaperPattern ||
+                contiguousWarmMassPattern ||
+                warmWallpaperWithIconsPattern
             ) {
                 if (scaled !== bitmap) {
                     scaled.recycle()
@@ -1902,12 +2010,12 @@ object SecurityCortex {
             }
 
             val hasStructuredCluster =
-                (maxComponentCells >= 3 && edgeShare >= 0.20f) ||
+                (maxComponentCells >= 3 && edgeShare >= 0.22f && darkShare >= 0.06f) ||
                     (clusters >= 2 && (darkShare >= 0.08f || edgeShare >= 0.34f)) ||
                     (
                         dangerRatio >= maxOf(injuryDangerRatioThreshold * 3f, 0.12f) &&
-                            darkShare >= 0.06f &&
-                            edgeShare >= 0.24f
+                            darkShare >= 0.09f &&
+                            edgeShare >= 0.28f
                         )
             if (hasStructuredCluster && dangerRatio > injuryDangerRatioThreshold) {
                 val clusterFactor = (clusters.toFloat() / 8f).coerceIn(0f, 1f)

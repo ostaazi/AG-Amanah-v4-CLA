@@ -24,6 +24,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.amanah.child.MainActivity
 import com.amanah.child.R
+import com.amanah.child.utils.AlertFilterPolicyManager
 import com.amanah.child.utils.SecurityCortex
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.Timestamp
@@ -63,6 +64,7 @@ class ScreenGuardianService : Service() {
     private val ALERT_TERMINAL_RETRY_INTERVAL_MS = 60_000L
     private val MAX_PENDING_ALERT_UPLOADS = 40
     private val MAX_ALERT_UPLOAD_ATTEMPTS = 6
+    private val SIGNAL_EVENT_COOLDOWN_MS = 20_000L
     private val EVIDENCE_TELEMETRY_PREFS = "ScreenGuardianEvidenceTelemetry"
     private val EVIDENCE_COUNTER_BUNDLE_TOTAL = "bundle_total"
     private val EVIDENCE_COUNTER_BUNDLE_COMPLETE = "bundle_complete"
@@ -91,6 +93,10 @@ class ScreenGuardianService : Service() {
     private var streamMode = false
     private val pendingAlertLock = Any()
     private val pendingAlertUploads = mutableListOf<PendingAlertUpload>()
+    private val alertPolicyGateLock = Any()
+    private val recentAlertFingerprintAt = mutableMapOf<String, Long>()
+    private val recentAlertTimelineMs = ArrayDeque<Long>()
+    private val recentSignalFingerprintAt = LinkedHashMap<String, Long>()
 
     private data class PendingAlertUpload(
         val correlationId: String,
@@ -107,6 +113,12 @@ class ScreenGuardianService : Service() {
         val missingFields: List<String>,
         val presentFields: Int,
         val completeness: Float
+    )
+
+    private data class AlertPolicyDecision(
+        val allow: Boolean,
+        val reason: String = "",
+        val policy: AlertFilterPolicyManager.Policy
     )
 
     private val retryPendingAlertsRunnable = object : Runnable {
@@ -339,6 +351,19 @@ class ScreenGuardianService : Service() {
                                 analysis.matchedSignals.any { it.contains("detector=violence_scene_model", ignoreCase = true) } -> "violence_scene_model"
                                 analysis.matchedSignals.any { it.contains("detector=injury_heuristic", ignoreCase = true) } -> "injury_heuristic"
                                 else -> "unknown"
+                            }
+                            val visualIgnoreReason = resolveVisualFalsePositiveReason(
+                                foregroundPackage = foregroundPackage,
+                                detector = detector,
+                                analysis = analysis,
+                                ocrText = mergedText
+                            )
+                            if (visualIgnoreReason != null) {
+                                Log.i(
+                                    "ScreenGuardian",
+                                    "Visual match suppressed as likely false-positive (pkg=$foregroundPackage, detector=$detector, reason=$visualIgnoreReason)."
+                                )
+                                return@runTextOcrPipeline
                             }
                             val detectorSummary = when (detector) {
                                 "nsfw_model" -> "On-device NSFW model detection"
@@ -741,6 +766,27 @@ class ScreenGuardianService : Service() {
         val matchedSignals = analysis.matchedSignals.take(8)
         val frame = if (!evidenceImageData.isNullOrBlank()) evidenceImageData else latestFrameData
         val hasSnapshot = !frame.isNullOrBlank()
+        val detector = when {
+            matchedSignals.any { it.contains("detector=injury_heuristic", ignoreCase = true) } -> "injury_heuristic"
+            matchedSignals.any { it.contains("detector=violence_scene_model", ignoreCase = true) } -> "violence_scene_model"
+            matchedSignals.any { it.contains("detector=nsfw_model", ignoreCase = true) } -> "nsfw_model"
+            else -> "unknown"
+        }
+        val policyDecision = evaluateAlertPolicy(
+            analysis = analysis,
+            triggerType = triggerType,
+            detector = detector,
+            foregroundPackage = foregroundPackage,
+            hasSnapshot = hasSnapshot,
+            normalizedText = normalizedText
+        )
+        if (!policyDecision.allow) {
+            Log.i(
+                "ScreenGuardian",
+                "Threat dropped by alert policy (reason=${policyDecision.reason}, detector=$detector, severity=${analysis.severity}, score=${analysis.score})."
+            )
+            return
+        }
         val bundleTelemetry = computeEvidenceBundleTelemetry(
             rawText = rawText,
             normalizedText = normalizedText,
@@ -790,7 +836,10 @@ class ScreenGuardianService : Service() {
             "evidenceBundleSequence" to bundleTelemetry.sequence,
             "evidenceUploadStatus" to "QUEUED",
             "evidenceUploadAttempt" to 0,
-            "evidenceUploadQueuedAt" to Timestamp.now()
+            "evidenceUploadQueuedAt" to Timestamp.now(),
+            "alertFilterPolicyVersion" to policyDecision.policy.version,
+            "alertFilterPolicyUpdatedAtMs" to policyDecision.policy.updatedAtMs,
+            "alertFilterPolicyGate" to "ALLOW"
         )
         if (!childId.isNullOrBlank()) {
             alert["childId"] = childId
@@ -804,12 +853,6 @@ class ScreenGuardianService : Service() {
         }
         if (triggerType == "IMAGE") {
             alert["visualEngineReady"] = SecurityCortex.isVisionEngineReady()
-            val detector = when {
-                matchedSignals.any { it.contains("detector=injury_heuristic", ignoreCase = true) } -> "injury_heuristic"
-                matchedSignals.any { it.contains("detector=violence_scene_model", ignoreCase = true) } -> "violence_scene_model"
-                matchedSignals.any { it.contains("detector=nsfw_model", ignoreCase = true) } -> "nsfw_model"
-                else -> "unknown"
-            }
             alert["visualDetector"] = detector
         }
         if (!frame.isNullOrBlank()) {
@@ -826,10 +869,149 @@ class ScreenGuardianService : Service() {
             source = "realtime",
             correlationId = correlationId
         )
+        maybeUploadSignalEvent(
+            foregroundPackage = foregroundPackage,
+            triggerType = triggerType,
+            rawText = rawText,
+            normalizedText = normalizedText,
+            analysis = analysis
+        )
 
         if (localLockEligible) {
             activateLocalEmergencyLock(analysis.category)
         }
+    }
+
+    private fun maybeUploadSignalEvent(
+        foregroundPackage: String,
+        triggerType: String,
+        rawText: String,
+        normalizedText: String,
+        analysis: SecurityCortex.AnalysisResult
+    ) {
+        val eventType = resolveSignalEventType(
+            foregroundPackage = foregroundPackage,
+            triggerType = triggerType,
+            normalizedText = normalizedText,
+            analysis = analysis
+        ) ?: return
+
+        val fingerprint = listOf(
+            eventType,
+            foregroundPackage.lowercase(Locale.ROOT),
+            normalizedText.take(90)
+        ).joinToString("|")
+        val now = System.currentTimeMillis()
+        synchronized(recentSignalFingerprintAt) {
+            val last = recentSignalFingerprintAt[fingerprint]
+            if (last != null && now - last < SIGNAL_EVENT_COOLDOWN_MS) {
+                return
+            }
+            recentSignalFingerprintAt[fingerprint] = now
+            if (recentSignalFingerprintAt.size > 360) {
+                val iterator = recentSignalFingerprintAt.entries.iterator()
+                repeat(90) {
+                    if (iterator.hasNext()) {
+                        iterator.next()
+                        iterator.remove()
+                    }
+                }
+            }
+        }
+
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        val parentId = prefs.getString("parentId", null) ?: return
+        val childId = prefs.getString("childDocumentId", null) ?: return
+        val childName = prefs.getString("childName", "My Child") ?: "My Child"
+        val scenarioHints = inferSignalScenarioHints(eventType, analysis)
+        val payload = hashMapOf<String, Any>(
+            "parentId" to parentId,
+            "childId" to childId,
+            "childName" to childName,
+            "eventType" to eventType,
+            "source" to "screen_guardian",
+            "platform" to if (foregroundPackage.isBlank()) "screen_monitor" else foregroundPackage,
+            "content" to rawText.take(2000),
+            "normalizedContent" to normalizedText.take(2000),
+            "confidence" to ((analysis.score * 100f).toInt()).coerceIn(0, 100),
+            "severity" to analysis.severity,
+            "timestamp" to Timestamp.now(),
+            "scenarioHints" to scenarioHints,
+            "context" to hashMapOf(
+                "triggerType" to triggerType,
+                "category" to analysis.category,
+                "matchedSignals" to analysis.matchedSignals.take(8)
+            )
+        )
+        db.collection("childSignalEvents")
+            .add(payload)
+            .addOnFailureListener { e ->
+                Log.w("ScreenGuardian", "Signal event upload failed: ${e.message}")
+            }
+    }
+
+    private fun resolveSignalEventType(
+        foregroundPackage: String,
+        triggerType: String,
+        normalizedText: String,
+        analysis: SecurityCortex.AnalysisResult
+    ): String? {
+        val pkg = foregroundPackage.lowercase(Locale.ROOT)
+        val browserLike = pkg.contains("chrome") ||
+            pkg.contains("browser") ||
+            pkg.contains("firefox") ||
+            pkg.contains("opera") ||
+            pkg.contains("edge")
+        val watchLike = pkg.contains("youtube") ||
+            pkg.contains("tiktok") ||
+            pkg.contains("instagram") ||
+            pkg.contains("snapchat") ||
+            pkg.contains("netflix") ||
+            pkg.contains("facebook")
+        val audioLike = pkg.contains("recorder") || pkg.contains("voice") || pkg.contains("audio")
+        val hasUrl = normalizedText.contains("http://") ||
+            normalizedText.contains("https://") ||
+            normalizedText.contains("www.") ||
+            Regex("\\b[a-z0-9.-]+\\.(com|net|org|io|me|app|ai|co)\\b").containsMatchIn(normalizedText)
+        val hasSearchIntent = normalizedText.contains("search") ||
+            normalizedText.contains("query") ||
+            normalizedText.contains("ابحث") ||
+            normalizedText.contains("بحث")
+        val hasAudioTranscriptCue = normalizedText.contains("voice message") ||
+            normalizedText.contains("audio message") ||
+            normalizedText.contains("speech to text") ||
+            normalizedText.contains("رسالة صوتية") ||
+            normalizedText.contains("مذكرة صوتية")
+
+        if (audioLike || hasAudioTranscriptCue) return "audio_transcript"
+        if (hasUrl) return "link_intent"
+        if (browserLike && hasSearchIntent) return "search_intent"
+        if (watchLike || triggerType.equals("IMAGE", ignoreCase = true)) return "watch_intent"
+        if (analysis.isDanger) return "conversation_pattern"
+        return null
+    }
+
+    private fun inferSignalScenarioHints(
+        eventType: String,
+        analysis: SecurityCortex.AnalysisResult
+    ): List<String> {
+        val hints = mutableListOf<String>()
+        when (eventType) {
+            "search_intent" -> hints += listOf("phishing_links", "inappropriate_content")
+            "watch_intent" -> hints += listOf("inappropriate_content", "harmful_challenges")
+            "audio_transcript" -> hints += listOf("bullying", "threat_exposure")
+            "link_intent" -> hints += listOf("phishing_links", "account_theft_fraud")
+            "conversation_pattern" -> hints += listOf("threat_exposure", "sexual_exploitation")
+        }
+        when (analysis.category) {
+            "تحريض على العنف" -> hints += "harmful_challenges"
+            "ابتزاز" -> hints += "threat_exposure"
+            "تواصل مشبوه" -> hints += "sexual_exploitation"
+            "إيذاء النفس" -> hints += "self_harm"
+            "محتوى للبالغين" -> hints += "inappropriate_content"
+            "تنمر إلكتروني" -> hints += "bullying"
+        }
+        return hints.distinct().take(8)
     }
 
     private fun shouldAutoLockLocally(
@@ -904,6 +1086,190 @@ class ScreenGuardianService : Service() {
         }
 
         return null
+    }
+
+    private fun resolveVisualFalsePositiveReason(
+        foregroundPackage: String,
+        detector: String,
+        analysis: SecurityCortex.AnalysisResult,
+        ocrText: String?
+    ): String? {
+        if (!detector.equals("injury_heuristic", ignoreCase = true)) {
+            return null
+        }
+
+        val pkg = foregroundPackage.trim().lowercase(Locale.ROOT)
+        val launcherLike = pkg.isNotBlank() && (
+            pkg.contains("launcher") ||
+                pkg.contains("oneui.home") ||
+                pkg.contains("miui.home") ||
+                pkg.contains("pixel.launcher") ||
+                pkg.contains("trebuchet")
+            )
+        if (launcherLike) {
+            return "launcher_context"
+        }
+
+        val normalized = if (ocrText.isNullOrBlank()) "" else SecurityCortex.normalizeTextForAudit(ocrText)
+        if (normalized.isNotBlank()) {
+            val markerHits = selfUiMarkers.count { marker ->
+                normalized.contains(SecurityCortex.normalizeTextForAudit(marker))
+            }
+            val hasAmanahBrand = normalized.contains("amanah") || normalized.contains("امانه")
+            if (hasAmanahBrand || markerHits >= 1) {
+                return "amanah_ui_marker"
+            }
+        }
+
+        val clusters = extractSignalFloat(analysis.matchedSignals, "clusters")
+        val ratio = extractSignalFloat(analysis.matchedSignals, "dangerRatio")
+        val strongRed = extractSignalFloat(analysis.matchedSignals, "strongRedShare")
+        val dark = extractSignalFloat(analysis.matchedSignals, "darkShare")
+        val edge = extractSignalFloat(analysis.matchedSignals, "edgeShare")
+        val topShare = extractSignalFloat(analysis.matchedSignals, "topShare")
+        val components = extractSignalFloat(analysis.matchedSignals, "components")
+        val maxComponent = extractSignalFloat(analysis.matchedSignals, "maxComponent")
+
+        val warmWallpaperLike =
+            clusters >= 8f &&
+                ratio >= 0.33f &&
+                strongRed >= 0.26f &&
+                dark < 0.30f &&
+                (
+                    (edge < 0.44f && (components >= 4f || maxComponent <= 5f)) ||
+                        (topShare in 0.12f..0.62f)
+                    )
+        if (warmWallpaperLike) {
+            return "warm_wallpaper_signature"
+        }
+
+        return null
+    }
+
+    private fun evaluateAlertPolicy(
+        analysis: SecurityCortex.AnalysisResult,
+        triggerType: String,
+        detector: String,
+        foregroundPackage: String,
+        hasSnapshot: Boolean,
+        normalizedText: String
+    ): AlertPolicyDecision {
+        val policy = AlertFilterPolicyManager.load(this)
+        if (!policy.enabled) {
+            return AlertPolicyDecision(allow = true, policy = policy)
+        }
+
+        val severityRank = AlertFilterPolicyManager.severityToRank(analysis.severity)
+        val confidence = ((analysis.score * 100f).toInt()).coerceIn(0, 100)
+        val trigger = triggerType.trim().uppercase(Locale.ROOT)
+        val minSeverity = if (trigger == "IMAGE") policy.minSeverityImage else policy.minSeverityText
+        val minConfidence = when (trigger) {
+            "IMAGE" -> policy.minConfidenceImage
+            "TEXT" -> policy.minConfidenceText
+            else -> policy.minConfidenceDefault
+        }
+
+        if (severityRank < minSeverity) {
+            return AlertPolicyDecision(
+                allow = false,
+                reason = "severity_gate",
+                policy = policy
+            )
+        }
+        if (confidence < minConfidence && severityRank < 4) {
+            return AlertPolicyDecision(
+                allow = false,
+                reason = "confidence_gate",
+                policy = policy
+            )
+        }
+        if (trigger == "IMAGE" && policy.requireSnapshotImage && !hasSnapshot) {
+            return AlertPolicyDecision(
+                allow = false,
+                reason = "missing_snapshot_gate",
+                policy = policy
+            )
+        }
+
+        if (policy.suppressInjuryHeuristic && detector.equals("injury_heuristic", ignoreCase = true)) {
+            val darkShare = extractSignalFloat(analysis.matchedSignals, "darkShare")
+            val edgeShare = extractSignalFloat(analysis.matchedSignals, "edgeShare")
+            val topShare = extractSignalFloat(analysis.matchedSignals, "topShare")
+            val dangerRatio = extractSignalFloat(analysis.matchedSignals, "dangerRatio")
+            val launcherLike = foregroundPackage.contains("launcher", ignoreCase = true)
+            if (launcherLike) {
+                return AlertPolicyDecision(
+                    allow = false,
+                    reason = "injury_launcher_gate",
+                    policy = policy
+                )
+            }
+            val weakInjuryStructure =
+                darkShare < policy.injuryMinDarkShare ||
+                    edgeShare < policy.injuryMinEdgeShare ||
+                    topShare > policy.injuryMaxTopShare ||
+                    dangerRatio < policy.injuryMinDangerRatio
+            if (weakInjuryStructure) {
+                return AlertPolicyDecision(
+                    allow = false,
+                    reason = "injury_structure_gate",
+                    policy = policy
+                )
+            }
+        }
+
+        val textFingerprint = normalizedText.trim().take(120)
+        val fingerprint = listOf(
+            trigger,
+            detector.lowercase(Locale.ROOT),
+            analysis.category.trim().lowercase(Locale.ROOT),
+            analysis.severity.trim().lowercase(Locale.ROOT),
+            foregroundPackage.trim().lowercase(Locale.ROOT),
+            textFingerprint.lowercase(Locale.ROOT)
+        ).joinToString("|")
+
+        val now = System.currentTimeMillis()
+        synchronized(alertPolicyGateLock) {
+            val cutoff = now - 60_000L
+            while (recentAlertTimelineMs.isNotEmpty() && recentAlertTimelineMs.first() < cutoff) {
+                recentAlertTimelineMs.removeFirst()
+            }
+            val dedupeCutoff = now - policy.dedupeWindowMs
+            if (policy.dedupeWindowMs > 0L) {
+                val it = recentAlertFingerprintAt.entries.iterator()
+                while (it.hasNext()) {
+                    val entry = it.next()
+                    if (entry.value < dedupeCutoff) {
+                        it.remove()
+                    }
+                }
+                val lastSeen = recentAlertFingerprintAt[fingerprint]
+                if (lastSeen != null && now - lastSeen < policy.dedupeWindowMs) {
+                    return AlertPolicyDecision(
+                        allow = false,
+                        reason = "dedupe_gate",
+                        policy = policy
+                    )
+                }
+            }
+            if (recentAlertTimelineMs.size >= policy.maxAlertsPerMinute) {
+                return AlertPolicyDecision(
+                    allow = false,
+                    reason = "rate_limit_gate",
+                    policy = policy
+                )
+            }
+            recentAlertTimelineMs.addLast(now)
+            recentAlertFingerprintAt[fingerprint] = now
+        }
+
+        return AlertPolicyDecision(allow = true, policy = policy)
+    }
+
+    private fun extractSignalFloat(signals: List<String>, key: String): Float {
+        val prefix = "$key="
+        val raw = signals.firstOrNull { it.startsWith(prefix, ignoreCase = true) } ?: return 0f
+        return raw.substringAfter("=", "").trim().toFloatOrNull() ?: 0f
     }
 
     private fun isLikelyObfuscated(rawText: String, normalizedText: String): Boolean {

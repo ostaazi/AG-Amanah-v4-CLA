@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   addDoc,
   collection,
@@ -203,12 +203,12 @@ const safeGetDocWithStatus = async (
 
 const MOCK_CHILD_TEMPLATES = [
   {
-    name: 'سارة - تجريبي',
+    name: 'Ø³Ø§Ø±Ø© - ØªØ¬Ø±ÙŠØ¨ÙŠ',
     age: 12,
     avatar: 'https://cdn-icons-png.flaticon.com/512/4140/4140048.png',
   },
   {
-    name: 'عمر - تجريبي',
+    name: 'Ø¹Ù…Ø± - ØªØ¬Ø±ÙŠØ¨ÙŠ',
     age: 15,
     avatar: 'https://cdn-icons-png.flaticon.com/512/4140/4140047.png',
   },
@@ -216,13 +216,13 @@ const MOCK_CHILD_TEMPLATES = [
 
 const MOCK_SUPERVISORS = [
   {
-    name: 'مشرف تجريبي 1',
+    name: 'Ù…Ø´Ø±Ù ØªØ¬Ø±ÙŠØ¨ÙŠ 1',
     email: 'mock.supervisor1@amanah.local',
     avatar:
       'https://img.freepik.com/premium-vector/hijab-woman-avatar-illustration-vector-woman-hijab-profile-icon_671746-348.jpg',
   },
   {
-    name: 'مشرف تجريبي 2',
+    name: 'Ù…Ø´Ø±Ù ØªØ¬Ø±ÙŠØ¨ÙŠ 2',
     email: 'mock.supervisor2@amanah.local',
     avatar:
       'https://img.freepik.com/premium-vector/hijab-woman-avatar-illustration-vector-woman-hijab-profile-icon_671746-348.jpg',
@@ -251,148 +251,148 @@ const MOCK_SCENARIO_PRESETS: Array<{
 }> = [
   {
     id: 'bullying',
-    keywords: ['تنمر', 'تعليقات جارحة', 'عزلة'],
+    keywords: ['ØªÙ†Ù…Ø±', 'ØªØ¹Ù„ÙŠÙ‚Ø§Øª Ø¬Ø§Ø±Ø­Ø©', 'Ø¹Ø²Ù„Ø©'],
     recommendation:
-      'ابدأ حوارًا داعمًا بلا لوم، ثم فعّل الحظر والإبلاغ مع متابعة نفسية قصيرة خلال 72 ساعة.',
+      'Ø§Ø¨Ø¯Ø£ Ø­ÙˆØ§Ø±Ù‹Ø§ Ø¯Ø§Ø¹Ù…Ù‹Ø§ Ø¨Ù„Ø§ Ù„ÙˆÙ…ØŒ Ø«Ù… ÙØ¹Ù‘Ù„ Ø§Ù„Ø­Ø¸Ø± ÙˆØ§Ù„Ø¥Ø¨Ù„Ø§Øº Ù…Ø¹ Ù…ØªØ§Ø¨Ø¹Ø© Ù†ÙØ³ÙŠØ© Ù‚ØµÙŠØ±Ø© Ø®Ù„Ø§Ù„ 72 Ø³Ø§Ø¹Ø©.',
     signals: [
       {
-        title: 'مؤشر مضايقات رقمية',
+        title: 'Ù…Ø¤Ø´Ø± Ù…Ø¶Ø§ÙŠÙ‚Ø§Øª Ø±Ù‚Ù…ÙŠØ©',
         severity: AlertSeverity.HIGH,
-        reason: 'رسائل سلبية متكررة مع حذف سريع للمحادثات.',
-        suggestedAction: 'توثيق الأدلة + تعديل الخصوصية + تواصل مدرسي إذا لزم.',
+        reason: 'Ø±Ø³Ø§Ø¦Ù„ Ø³Ù„Ø¨ÙŠØ© Ù…ØªÙƒØ±Ø±Ø© Ù…Ø¹ Ø­Ø°Ù Ø³Ø±ÙŠØ¹ Ù„Ù„Ù…Ø­Ø§Ø¯Ø«Ø§Øª.',
+        suggestedAction: 'ØªÙˆØ«ÙŠÙ‚ Ø§Ù„Ø£Ø¯Ù„Ø© + ØªØ¹Ø¯ÙŠÙ„ Ø§Ù„Ø®ØµÙˆØµÙŠØ© + ØªÙˆØ§ØµÙ„ Ù…Ø¯Ø±Ø³ÙŠ Ø¥Ø°Ø§ Ù„Ø²Ù….',
       },
       {
-        title: 'تراجع في الثقة',
+        title: 'ØªØ±Ø§Ø¬Ø¹ ÙÙŠ Ø§Ù„Ø«Ù‚Ø©',
         severity: AlertSeverity.MEDIUM,
-        reason: 'انخفاض ملحوظ في التفاعل بعد الاستخدام.',
-        suggestedAction: 'جلسة حوار يومية قصيرة مع تعزيز الدعم الأسري.',
+        reason: 'Ø§Ù†Ø®ÙØ§Ø¶ Ù…Ù„Ø­ÙˆØ¸ ÙÙŠ Ø§Ù„ØªÙØ§Ø¹Ù„ Ø¨Ø¹Ø¯ Ø§Ù„Ø§Ø³ØªØ®Ø¯Ø§Ù….',
+        suggestedAction: 'Ø¬Ù„Ø³Ø© Ø­ÙˆØ§Ø± ÙŠÙˆÙ…ÙŠØ© Ù‚ØµÙŠØ±Ø© Ù…Ø¹ ØªØ¹Ø²ÙŠØ² Ø§Ù„Ø¯Ø¹Ù… Ø§Ù„Ø£Ø³Ø±ÙŠ.',
       },
     ],
   },
   {
     id: 'threat_exposure',
-    keywords: ['تهديد', 'ابتزاز', 'خوف'],
+    keywords: ['ØªÙ‡Ø¯ÙŠØ¯', 'Ø§Ø¨ØªØ²Ø§Ø²', 'Ø®ÙˆÙ'],
     recommendation:
-      'فعّل خطة 10 دقائق: لا تفاوض، لا دفع، حفظ الأدلة، تأمين الحساب، ثم الإبلاغ الرسمي.',
+      'ÙØ¹Ù‘Ù„ Ø®Ø·Ø© 10 Ø¯Ù‚Ø§Ø¦Ù‚: Ù„Ø§ ØªÙØ§ÙˆØ¶ØŒ Ù„Ø§ Ø¯ÙØ¹ØŒ Ø­ÙØ¸ Ø§Ù„Ø£Ø¯Ù„Ø©ØŒ ØªØ£Ù…ÙŠÙ† Ø§Ù„Ø­Ø³Ø§Ø¨ØŒ Ø«Ù… Ø§Ù„Ø¥Ø¨Ù„Ø§Øº Ø§Ù„Ø±Ø³Ù…ÙŠ.',
     signals: [
       {
-        title: 'احتمال ابتزاز مباشر',
+        title: 'Ø§Ø­ØªÙ…Ø§Ù„ Ø§Ø¨ØªØ²Ø§Ø² Ù…Ø¨Ø§Ø´Ø±',
         severity: AlertSeverity.CRITICAL,
-        reason: 'مفردات تهديد واضحة مرتبطة بطلب مالي/صور.',
-        suggestedAction: 'إيقاف التواصل فورًا + حماية الحساب + تصعيد قانوني.',
+        reason: 'Ù…ÙØ±Ø¯Ø§Øª ØªÙ‡Ø¯ÙŠØ¯ ÙˆØ§Ø¶Ø­Ø© Ù…Ø±ØªØ¨Ø·Ø© Ø¨Ø·Ù„Ø¨ Ù…Ø§Ù„ÙŠ/ØµÙˆØ±.',
+        suggestedAction: 'Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„ØªÙˆØ§ØµÙ„ ÙÙˆØ±Ù‹Ø§ + Ø­Ù…Ø§ÙŠØ© Ø§Ù„Ø­Ø³Ø§Ø¨ + ØªØµØ¹ÙŠØ¯ Ù‚Ø§Ù†ÙˆÙ†ÙŠ.',
       },
       {
-        title: 'قلق حاد عند الإشعارات',
+        title: 'Ù‚Ù„Ù‚ Ø­Ø§Ø¯ Ø¹Ù†Ø¯ Ø§Ù„Ø¥Ø´Ø¹Ø§Ø±Ø§Øª',
         severity: AlertSeverity.HIGH,
-        reason: 'استجابة خوف متكررة من جهة تواصل بعينها.',
-        suggestedAction: 'حظر فوري ومراجعة أمن الجهاز.',
+        reason: 'Ø§Ø³ØªØ¬Ø§Ø¨Ø© Ø®ÙˆÙ Ù…ØªÙƒØ±Ø±Ø© Ù…Ù† Ø¬Ù‡Ø© ØªÙˆØ§ØµÙ„ Ø¨Ø¹ÙŠÙ†Ù‡Ø§.',
+        suggestedAction: 'Ø­Ø¸Ø± ÙÙˆØ±ÙŠ ÙˆÙ…Ø±Ø§Ø¬Ø¹Ø© Ø£Ù…Ù† Ø§Ù„Ø¬Ù‡Ø§Ø².',
       },
     ],
   },
   {
     id: 'gaming',
-    keywords: ['سهر', 'إدمان', 'لعب'],
+    keywords: ['Ø³Ù‡Ø±', 'Ø¥Ø¯Ù…Ø§Ù†', 'Ù„Ø¹Ø¨'],
     recommendation:
-      'اعتمد تدخلًا تدريجيًا 4 أسابيع: ضبط النوم، خفض الوقت، مكافآت التزام، ومراجعة أسبوعية.',
+      'Ø§Ø¹ØªÙ…Ø¯ ØªØ¯Ø®Ù„Ù‹Ø§ ØªØ¯Ø±ÙŠØ¬ÙŠÙ‹Ø§ 4 Ø£Ø³Ø§Ø¨ÙŠØ¹: Ø¶Ø¨Ø· Ø§Ù„Ù†ÙˆÙ…ØŒ Ø®ÙØ¶ Ø§Ù„ÙˆÙ‚ØªØŒ Ù…ÙƒØ§ÙØ¢Øª Ø§Ù„ØªØ²Ø§Ù…ØŒ ÙˆÙ…Ø±Ø§Ø¬Ø¹Ø© Ø£Ø³Ø¨ÙˆØ¹ÙŠØ©.',
     signals: [
       {
-        title: 'استخدام ليلي مفرط',
+        title: 'Ø§Ø³ØªØ®Ø¯Ø§Ù… Ù„ÙŠÙ„ÙŠ Ù…ÙØ±Ø·',
         severity: AlertSeverity.HIGH,
-        reason: 'تمدد اللعب بعد منتصف الليل بشكل متكرر.',
-        suggestedAction: 'تفعيل Bedtime + قفل التطبيقات عالية الاستهلاك.',
+        reason: 'ØªÙ…Ø¯Ø¯ Ø§Ù„Ù„Ø¹Ø¨ Ø¨Ø¹Ø¯ Ù…Ù†ØªØµÙ Ø§Ù„Ù„ÙŠÙ„ Ø¨Ø´ÙƒÙ„ Ù…ØªÙƒØ±Ø±.',
+        suggestedAction: 'ØªÙØ¹ÙŠÙ„ Bedtime + Ù‚ÙÙ„ Ø§Ù„ØªØ·Ø¨ÙŠÙ‚Ø§Øª Ø¹Ø§Ù„ÙŠØ© Ø§Ù„Ø§Ø³ØªÙ‡Ù„Ø§Ùƒ.',
       },
       {
-        title: 'توتر عند الإيقاف',
+        title: 'ØªÙˆØªØ± Ø¹Ù†Ø¯ Ø§Ù„Ø¥ÙŠÙ‚Ø§Ù',
         severity: AlertSeverity.MEDIUM,
-        reason: 'عصبية واضحة عند انتهاء مدة اللعب.',
-        suggestedAction: 'استراتيجية خفض تدريجي بدل المنع المفاجئ.',
+        reason: 'Ø¹ØµØ¨ÙŠØ© ÙˆØ§Ø¶Ø­Ø© Ø¹Ù†Ø¯ Ø§Ù†ØªÙ‡Ø§Ø¡ Ù…Ø¯Ø© Ø§Ù„Ù„Ø¹Ø¨.',
+        suggestedAction: 'Ø§Ø³ØªØ±Ø§ØªÙŠØ¬ÙŠØ© Ø®ÙØ¶ ØªØ¯Ø±ÙŠØ¬ÙŠ Ø¨Ø¯Ù„ Ø§Ù„Ù…Ù†Ø¹ Ø§Ù„Ù…ÙØ§Ø¬Ø¦.',
       },
     ],
   },
   {
     id: 'inappropriate_content',
-    keywords: ['محتوى صادم', 'إباحية', 'فضول'],
+    keywords: ['Ù…Ø­ØªÙˆÙ‰ ØµØ§Ø¯Ù…', 'Ø¥Ø¨Ø§Ø­ÙŠØ©', 'ÙØ¶ÙˆÙ„'],
     recommendation:
-      'شدد الفلترة حسب العمر، وأضف حوارًا آمنًا: أغلق وبلّغ دون عقوبة أو تخويف.',
+      'Ø´Ø¯Ø¯ Ø§Ù„ÙÙ„ØªØ±Ø© Ø­Ø³Ø¨ Ø§Ù„Ø¹Ù…Ø±ØŒ ÙˆØ£Ø¶Ù Ø­ÙˆØ§Ø±Ù‹Ø§ Ø¢Ù…Ù†Ù‹Ø§: Ø£ØºÙ„Ù‚ ÙˆØ¨Ù„Ù‘Øº Ø¯ÙˆÙ† Ø¹Ù‚ÙˆØ¨Ø© Ø£Ùˆ ØªØ®ÙˆÙŠÙ.',
     signals: [
       {
-        title: 'محاولات وصول لمحتوى محجوب',
+        title: 'Ù…Ø­Ø§ÙˆÙ„Ø§Øª ÙˆØµÙˆÙ„ Ù„Ù…Ø­ØªÙˆÙ‰ Ù…Ø­Ø¬ÙˆØ¨',
         severity: AlertSeverity.HIGH,
-        reason: 'تكرار وصول لتصنيفات غير مناسبة للعمر.',
-        suggestedAction: 'تقوية SafeSearch وفلترة DNS ومراجعة المتصفح.',
+        reason: 'ØªÙƒØ±Ø§Ø± ÙˆØµÙˆÙ„ Ù„ØªØµÙ†ÙŠÙØ§Øª ØºÙŠØ± Ù…Ù†Ø§Ø³Ø¨Ø© Ù„Ù„Ø¹Ù…Ø±.',
+        suggestedAction: 'ØªÙ‚ÙˆÙŠØ© SafeSearch ÙˆÙÙ„ØªØ±Ø© DNS ÙˆÙ…Ø±Ø§Ø¬Ø¹Ø© Ø§Ù„Ù…ØªØµÙØ­.',
       },
       {
-        title: 'استخدام تصفح خفي متكرر',
+        title: 'Ø§Ø³ØªØ®Ø¯Ø§Ù… ØªØµÙØ­ Ø®ÙÙŠ Ù…ØªÙƒØ±Ø±',
         severity: AlertSeverity.MEDIUM,
-        reason: 'تنقل مكثف بين روابط خارجية غير موثوقة.',
-        suggestedAction: 'مراجعة الإعدادات وتفعيل قيود البحث الآمن.',
+        reason: 'ØªÙ†Ù‚Ù„ Ù…ÙƒØ«Ù Ø¨ÙŠÙ† Ø±ÙˆØ§Ø¨Ø· Ø®Ø§Ø±Ø¬ÙŠØ© ØºÙŠØ± Ù…ÙˆØ«ÙˆÙ‚Ø©.',
+        suggestedAction: 'Ù…Ø±Ø§Ø¬Ø¹Ø© Ø§Ù„Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª ÙˆØªÙØ¹ÙŠÙ„ Ù‚ÙŠÙˆØ¯ Ø§Ù„Ø¨Ø­Ø« Ø§Ù„Ø¢Ù…Ù†.',
       },
     ],
   },
   {
     id: 'cyber_crime',
-    keywords: ['اختراق', 'سكربت', 'تجاوز'],
+    keywords: ['Ø§Ø®ØªØ±Ø§Ù‚', 'Ø³ÙƒØ±Ø¨Øª', 'ØªØ¬Ø§ÙˆØ²'],
     recommendation:
-      'حوّل الفضول التقني إلى مسار قانوني (تعلم أمني أخلاقي) مع توضيح العواقب الجنائية.',
+      'Ø­ÙˆÙ‘Ù„ Ø§Ù„ÙØ¶ÙˆÙ„ Ø§Ù„ØªÙ‚Ù†ÙŠ Ø¥Ù„Ù‰ Ù…Ø³Ø§Ø± Ù‚Ø§Ù†ÙˆÙ†ÙŠ (ØªØ¹Ù„Ù… Ø£Ù…Ù†ÙŠ Ø£Ø®Ù„Ø§Ù‚ÙŠ) Ù…Ø¹ ØªÙˆØ¶ÙŠØ­ Ø§Ù„Ø¹ÙˆØ§Ù‚Ø¨ Ø§Ù„Ø¬Ù†Ø§Ø¦ÙŠØ©.',
     signals: [
       {
-        title: 'ميل سلوكي هجومي',
+        title: 'Ù…ÙŠÙ„ Ø³Ù„ÙˆÙƒÙŠ Ù‡Ø¬ÙˆÙ…ÙŠ',
         severity: AlertSeverity.HIGH,
-        reason: 'اهتمام متكرر بأدوات تعطيل/اختراق.',
-        suggestedAction: 'منع الأدوات المجهولة + توجيه تعليمي قانوني.',
+        reason: 'Ø§Ù‡ØªÙ…Ø§Ù… Ù…ØªÙƒØ±Ø± Ø¨Ø£Ø¯ÙˆØ§Øª ØªØ¹Ø·ÙŠÙ„/Ø§Ø®ØªØ±Ø§Ù‚.',
+        suggestedAction: 'Ù…Ù†Ø¹ Ø§Ù„Ø£Ø¯ÙˆØ§Øª Ø§Ù„Ù…Ø¬Ù‡ÙˆÙ„Ø© + ØªÙˆØ¬ÙŠÙ‡ ØªØ¹Ù„ÙŠÙ…ÙŠ Ù‚Ø§Ù†ÙˆÙ†ÙŠ.',
       },
       {
-        title: 'إخفاء الهوية المفرط',
+        title: 'Ø¥Ø®ÙØ§Ø¡ Ø§Ù„Ù‡ÙˆÙŠØ© Ø§Ù„Ù…ÙØ±Ø·',
         severity: AlertSeverity.MEDIUM,
-        reason: 'استخدام قنوات إخفاء دون مبرر واضح.',
-        suggestedAction: 'مراجعة الاستخدام وتعريف الحدود القانونية.',
+        reason: 'Ø§Ø³ØªØ®Ø¯Ø§Ù… Ù‚Ù†ÙˆØ§Øª Ø¥Ø®ÙØ§Ø¡ Ø¯ÙˆÙ† Ù…Ø¨Ø±Ø± ÙˆØ§Ø¶Ø­.',
+        suggestedAction: 'Ù…Ø±Ø§Ø¬Ø¹Ø© Ø§Ù„Ø§Ø³ØªØ®Ø¯Ø§Ù… ÙˆØªØ¹Ø±ÙŠÙ Ø§Ù„Ø­Ø¯ÙˆØ¯ Ø§Ù„Ù‚Ø§Ù†ÙˆÙ†ÙŠØ©.',
       },
     ],
   },
   {
     id: 'crypto_scams',
-    keywords: ['ربح سريع', 'تحويل', 'قنوات استثمار'],
+    keywords: ['Ø±Ø¨Ø­ Ø³Ø±ÙŠØ¹', 'ØªØ­ÙˆÙŠÙ„', 'Ù‚Ù†ÙˆØ§Øª Ø§Ø³ØªØ«Ù…Ø§Ø±'],
     recommendation:
-      'فعّل مراجعة أسرية لأي معاملة مالية رقمية، وامنع القنوات غير الموثوقة فورًا.',
+      'ÙØ¹Ù‘Ù„ Ù…Ø±Ø§Ø¬Ø¹Ø© Ø£Ø³Ø±ÙŠØ© Ù„Ø£ÙŠ Ù…Ø¹Ø§Ù…Ù„Ø© Ù…Ø§Ù„ÙŠØ© Ø±Ù‚Ù…ÙŠØ©ØŒ ÙˆØ§Ù…Ù†Ø¹ Ø§Ù„Ù‚Ù†ÙˆØ§Øª ØºÙŠØ± Ø§Ù„Ù…ÙˆØ«ÙˆÙ‚Ø© ÙÙˆØ±Ù‹Ø§.',
     signals: [
       {
-        title: 'اندفاع مالي عالي المخاطرة',
+        title: 'Ø§Ù†Ø¯ÙØ§Ø¹ Ù…Ø§Ù„ÙŠ Ø¹Ø§Ù„ÙŠ Ø§Ù„Ù…Ø®Ø§Ø·Ø±Ø©',
         severity: AlertSeverity.HIGH,
-        reason: 'محاولات تحويل متكررة لجهات مجهولة.',
-        suggestedAction: 'تعطيل المدفوعات غير المعتمدة ومراجعة ولي الأمر.',
+        reason: 'Ù…Ø­Ø§ÙˆÙ„Ø§Øª ØªØ­ÙˆÙŠÙ„ Ù…ØªÙƒØ±Ø±Ø© Ù„Ø¬Ù‡Ø§Øª Ù…Ø¬Ù‡ÙˆÙ„Ø©.',
+        suggestedAction: 'ØªØ¹Ø·ÙŠÙ„ Ø§Ù„Ù…Ø¯ÙÙˆØ¹Ø§Øª ØºÙŠØ± Ø§Ù„Ù…Ø¹ØªÙ…Ø¯Ø© ÙˆÙ…Ø±Ø§Ø¬Ø¹Ø© ÙˆÙ„ÙŠ Ø§Ù„Ø£Ù…Ø±.',
       },
       {
-        title: 'تأثر بتوصيات مضللة',
+        title: 'ØªØ£Ø«Ø± Ø¨ØªÙˆØµÙŠØ§Øª Ù…Ø¶Ù„Ù„Ø©',
         severity: AlertSeverity.MEDIUM,
-        reason: 'تفاعل مع قنوات تعد بأرباح مضمونة.',
-        suggestedAction: 'توعية مالية أساسية وحظر المصادر الاحتيالية.',
+        reason: 'ØªÙØ§Ø¹Ù„ Ù…Ø¹ Ù‚Ù†ÙˆØ§Øª ØªØ¹Ø¯ Ø¨Ø£Ø±Ø¨Ø§Ø­ Ù…Ø¶Ù…ÙˆÙ†Ø©.',
+        suggestedAction: 'ØªÙˆØ¹ÙŠØ© Ù…Ø§Ù„ÙŠØ© Ø£Ø³Ø§Ø³ÙŠØ© ÙˆØ­Ø¸Ø± Ø§Ù„Ù…ØµØ§Ø¯Ø± Ø§Ù„Ø§Ø­ØªÙŠØ§Ù„ÙŠØ©.',
       },
     ],
   },
   {
     id: 'phishing_links',
-    keywords: ['تصيد', 'رابط مشبوه', 'otp', 'phishing'],
+    keywords: ['ØªØµÙŠØ¯', 'Ø±Ø§Ø¨Ø· Ù…Ø´Ø¨ÙˆÙ‡', 'otp', 'phishing'],
     recommendation:
-      'فعّل خطة مضاد التصيد فوراً: عزل الروابط، تغيير كلمات المرور، تفعيل المصادقة الثنائية (2FA)، ومراجعة جلسات الدخول النشطة.',
+      'ÙØ¹Ù‘Ù„ Ø®Ø·Ø© Ù…Ø¶Ø§Ø¯ Ø§Ù„ØªØµÙŠØ¯ ÙÙˆØ±Ø§Ù‹: Ø¹Ø²Ù„ Ø§Ù„Ø±ÙˆØ§Ø¨Ø·ØŒ ØªØºÙŠÙŠØ± ÙƒÙ„Ù…Ø§Øª Ø§Ù„Ù…Ø±ÙˆØ±ØŒ ØªÙØ¹ÙŠÙ„ Ø§Ù„Ù…ØµØ§Ø¯Ù‚Ø© Ø§Ù„Ø«Ù†Ø§Ø¦ÙŠØ© (2FA)ØŒ ÙˆÙ…Ø±Ø§Ø¬Ø¹Ø© Ø¬Ù„Ø³Ø§Øª Ø§Ù„Ø¯Ø®ÙˆÙ„ Ø§Ù„Ù†Ø´Ø·Ø©.',
     signals: [
       {
-        title: 'رابط تصيد نشط',
+        title: 'Ø±Ø§Ø¨Ø· ØªØµÙŠØ¯ Ù†Ø´Ø·',
         severity: AlertSeverity.CRITICAL,
-        reason: 'تم رصد رابط مختصر يطلب بيانات دخول أو رمز تحقق.',
-        suggestedAction: 'منع الرابط + تغيير كلمة المرور + غلق الجلسات + إبلاغ المنصة.',
+        reason: 'ØªÙ… Ø±ØµØ¯ Ø±Ø§Ø¨Ø· Ù…Ø®ØªØµØ± ÙŠØ·Ù„Ø¨ Ø¨ÙŠØ§Ù†Ø§Øª Ø¯Ø®ÙˆÙ„ Ø£Ùˆ Ø±Ù…Ø² ØªØ­Ù‚Ù‚.',
+        suggestedAction: 'Ù…Ù†Ø¹ Ø§Ù„Ø±Ø§Ø¨Ø· + ØªØºÙŠÙŠØ± ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± + ØºÙ„Ù‚ Ø§Ù„Ø¬Ù„Ø³Ø§Øª + Ø¥Ø¨Ù„Ø§Øº Ø§Ù„Ù…Ù†ØµØ©.',
       },
       {
-        title: 'مؤشرات سرقة حساب',
+        title: 'Ù…Ø¤Ø´Ø±Ø§Øª Ø³Ø±Ù‚Ø© Ø­Ø³Ø§Ø¨',
         severity: AlertSeverity.HIGH,
-        reason: 'طلبات متكررة لرموز OTP أو صفحات دخول غير معروفة.',
-        suggestedAction: 'تفعيل المصادقة الثنائية (2FA) وتدقيق أجهزة تسجيل الدخول فوراً.',
+        reason: 'Ø·Ù„Ø¨Ø§Øª Ù…ØªÙƒØ±Ø±Ø© Ù„Ø±Ù…ÙˆØ² OTP Ø£Ùˆ ØµÙØ­Ø§Øª Ø¯Ø®ÙˆÙ„ ØºÙŠØ± Ù…Ø¹Ø±ÙˆÙØ©.',
+        suggestedAction: 'ØªÙØ¹ÙŠÙ„ Ø§Ù„Ù…ØµØ§Ø¯Ù‚Ø© Ø§Ù„Ø«Ù†Ø§Ø¦ÙŠØ© (2FA) ÙˆØªØ¯Ù‚ÙŠÙ‚ Ø£Ø¬Ù‡Ø²Ø© ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø¯Ø®ÙˆÙ„ ÙÙˆØ±Ø§Ù‹.',
       },
     ],
   },
 ];
 
 const createMockPsychProfile = () => {
-  const emotions = ['هادئ', 'قلق', 'متوتر', 'منعزل', 'سعيد'];
+  const emotions = ['Ù‡Ø§Ø¯Ø¦', 'Ù‚Ù„Ù‚', 'Ù…ØªÙˆØªØ±', 'Ù…Ù†Ø¹Ø²Ù„', 'Ø³Ø¹ÙŠØ¯'];
   const anxiety = 35 + Math.floor(Math.random() * 60);
   const scenario = randomFrom(MOCK_SCENARIO_PRESETS);
   const mood = Math.max(20, 100 - anxiety + Math.floor(Math.random() * 20) - 10);
@@ -412,11 +412,11 @@ const createMockPsychProfile = () => {
       ...signal,
     })),
     weeklyTrend: [
-      { label: 'الإثنين', value: 48 + Math.floor(Math.random() * 40) },
-      { label: 'الثلاثاء', value: 45 + Math.floor(Math.random() * 42) },
-      { label: 'الأربعاء', value: 50 + Math.floor(Math.random() * 38) },
-      { label: 'الخميس', value: 52 + Math.floor(Math.random() * 35) },
-      { label: 'الجمعة', value: 47 + Math.floor(Math.random() * 43) },
+      { label: 'Ø§Ù„Ø¥Ø«Ù†ÙŠÙ†', value: 48 + Math.floor(Math.random() * 40) },
+      { label: 'Ø§Ù„Ø«Ù„Ø§Ø«Ø§Ø¡', value: 45 + Math.floor(Math.random() * 42) },
+      { label: 'Ø§Ù„Ø£Ø±Ø¨Ø¹Ø§Ø¡', value: 50 + Math.floor(Math.random() * 38) },
+      { label: 'Ø§Ù„Ø®Ù…ÙŠØ³', value: 52 + Math.floor(Math.random() * 35) },
+      { label: 'Ø§Ù„Ø¬Ù…Ø¹Ø©', value: 47 + Math.floor(Math.random() * 43) },
     ],
   };
 };
@@ -450,28 +450,39 @@ const ensureMockChildren = async (parentId: string, minCount: number) => {
 
   for (let i = 0; i < missing; i++) {
     const template = MOCK_CHILD_TEMPLATES[i % MOCK_CHILD_TEMPLATES.length];
-    await addDoc(collection(db!, 'children'), {
-      parentId,
-      role: 'CHILD',
-      mockTag: MOCK_TAG,
-      isMock: true,
-      name: `${template.name} ${Date.now().toString().slice(-4)}`,
-      age: template.age,
-      avatar: template.avatar,
-      status: 'offline',
-      batteryLevel: 100,
-      signalStrength: 4,
-      appUsage: [],
-      screenTimeLimit: 180,
-      currentScreenTime: 0,
-      deviceLocked: false,
-      cameraBlocked: false,
-      micBlocked: false,
-      preventAppInstall: false,
-      preventDeviceLock: false,
-      createdAt: Timestamp.now(),
-    });
-    created++;
+    try {
+      await addDoc(collection(db!, 'children'), {
+        parentId,
+        role: 'CHILD',
+        mockTag: MOCK_TAG,
+        isMock: true,
+        name: `${template.name} ${Date.now().toString().slice(-4)}`,
+        age: template.age,
+        avatar: template.avatar,
+        status: 'offline',
+        batteryLevel: 100,
+        signalStrength: 4,
+        appUsage: [],
+        screenTimeLimit: 180,
+        currentScreenTime: 0,
+        deviceLocked: false,
+        cameraBlocked: false,
+        micBlocked: false,
+        preventAppInstall: false,
+        preventDeviceLock: false,
+        createdAt: Timestamp.now(),
+      });
+      created++;
+    } catch (error) {
+      if (isPermissionDeniedError(error)) {
+        logMockDataNoticeOnce(
+          'mutation-permission-denied:inject-children',
+          'inject mock children skipped due to permission-denied.'
+        );
+        break;
+      }
+      throw error;
+    }
   }
 
   const refreshed = await listChildrenByParent(parentId);
@@ -488,15 +499,26 @@ const ensureMockSupervisors = async (parentId: string, minCount: number) => {
 
   for (let i = 0; i < missing; i++) {
     const item = MOCK_SUPERVISORS[i % MOCK_SUPERVISORS.length];
-    await addDoc(collection(db!, 'supervisors'), {
-      ...item,
-      parentId,
-      role: 'SUPERVISOR',
-      mockTag: MOCK_TAG,
-      isMock: true,
-      createdAt: Timestamp.now(),
-    });
-    created++;
+    try {
+      await addDoc(collection(db!, 'supervisors'), {
+        ...item,
+        parentId,
+        role: 'SUPERVISOR',
+        mockTag: MOCK_TAG,
+        isMock: true,
+        createdAt: Timestamp.now(),
+      });
+      created++;
+    } catch (error) {
+      if (isPermissionDeniedError(error)) {
+        logMockDataNoticeOnce(
+          'mutation-permission-denied:inject-supervisors',
+          'inject mock supervisors skipped due to permission-denied.'
+        );
+        break;
+      }
+      throw error;
+    }
   }
 
   return { created };
@@ -548,100 +570,124 @@ export const injectSelectedMockData = async (
   }
 
   if (selected.has('devices')) {
-    const updatePromises = mockChildren.map((childDoc: any, idx: number) =>
-      updateDoc(doc(db, 'children', childDoc.id), {
-        status: idx % 2 === 0 ? 'online' : 'offline',
-        batteryLevel: 20 + (idx * 17) % 75,
-        signalStrength: 1 + (idx % 4),
-        deviceNickname: idx % 2 === 0 ? 'Android Mock' : 'iPhone Mock',
-        deviceOwnerUid: `mock-device-${childDoc.id}`,
-        appUsage: [
-          { id: `mock-app-1-${idx}`, appName: 'TikTok', icon: '📸', minutesUsed: 120 + idx * 10, isBlocked: false },
-          { id: `mock-app-2-${idx}`, appName: 'Discord', icon: '💬', minutesUsed: 45 + idx * 8, isBlocked: idx % 2 === 0 },
-        ],
-      })
+    result.devices = await runMutationBatch(
+      mockChildren.map(
+        (childDoc: any, idx: number) => () =>
+          updateDoc(doc(db, 'children', childDoc.id), {
+            status: idx % 2 === 0 ? 'online' : 'offline',
+            batteryLevel: 20 + (idx * 17) % 75,
+            signalStrength: 1 + (idx % 4),
+            deviceNickname: idx % 2 === 0 ? 'Android Mock' : 'iPhone Mock',
+            deviceOwnerUid: `mock-device-${childDoc.id}`,
+            appUsage: [
+              {
+                id: `mock-app-1-${idx}`,
+                appName: 'TikTok',
+                icon: 'MOCK',
+                minutesUsed: 120 + idx * 10,
+                isBlocked: false,
+              },
+              {
+                id: `mock-app-2-${idx}`,
+                appName: 'Discord',
+                icon: 'MOCK',
+                minutesUsed: 45 + idx * 8,
+                isBlocked: idx % 2 === 0,
+              },
+            ],
+          })
+      ),
+      'inject mock device fields'
     );
-    await Promise.all(updatePromises);
-    result.devices = mockChildren.length;
   }
 
   if (selected.has('timings')) {
-    const updatePromises = mockChildren.map((childDoc: any, idx: number) =>
-      updateDoc(doc(db, 'children', childDoc.id), {
-        screenTimeLimit: 90 + idx * 30,
-        currentScreenTime: 15 + idx * 10,
-      })
+    result.timings = await runMutationBatch(
+      mockChildren.map(
+        (childDoc: any, idx: number) => () =>
+          updateDoc(doc(db, 'children', childDoc.id), {
+            screenTimeLimit: 90 + idx * 30,
+            currentScreenTime: 15 + idx * 10,
+          })
+      ),
+      'inject mock timing fields'
     );
-    await Promise.all(updatePromises);
-    result.timings = mockChildren.length;
   }
 
   if (selected.has('psychPulse')) {
-    const updatePromises = mockChildren.map((childDoc: any) =>
-      updateDoc(doc(db, 'children', childDoc.id), {
-        psychProfile: createMockPsychProfile(),
-      })
+    result.psychPulse = await runMutationBatch(
+      mockChildren.map(
+        (childDoc: any) => () =>
+          updateDoc(doc(db, 'children', childDoc.id), {
+            psychProfile: createMockPsychProfile(),
+          })
+      ),
+      'inject mock psych profile'
     );
-    await Promise.all(updatePromises);
-    result.psychPulse = mockChildren.length;
   }
 
   if (selected.has('eventsAlerts')) {
-    let createdAlerts = 0;
+    const alertMutations: Array<() => Promise<unknown>> = [];
     for (const childDoc of mockChildren) {
       const childName = String(childDoc.data()?.name || 'Mock Child');
-      await addDoc(collection(db, 'alerts'), {
-        parentId: ownerId,
-        childName,
-        platform: 'Instagram',
-        content: 'Mock: potential bullying language detected in direct message.',
-        category: Category.BULLYING,
-        severity: AlertSeverity.HIGH,
-        aiAnalysis: 'Mock analysis: repeated harmful language pattern.',
-        status: 'NEW',
-        mockTag: MOCK_TAG,
-        isMock: true,
-        timestamp: Timestamp.now(),
-      });
-      createdAlerts++;
-
-      await addDoc(collection(db, 'alerts'), {
-        parentId: ownerId,
-        childName,
-        platform: 'Discord',
-        content: 'Mock: direct threat intent detected.',
-        category: Category.BLACKMAIL,
-        severity: AlertSeverity.CRITICAL,
-        aiAnalysis: 'Mock analysis: explicit threat keyword sequence.',
-        status: 'NEW',
-        mockTag: MOCK_TAG,
-        isMock: true,
-        timestamp: Timestamp.now(),
-      });
-      createdAlerts++;
+      alertMutations.push(() =>
+        addDoc(collection(db, 'alerts'), {
+          parentId: ownerId,
+          childName,
+          platform: 'Instagram',
+          content: 'Mock: potential bullying language detected in direct message.',
+          category: Category.BULLYING,
+          severity: AlertSeverity.HIGH,
+          aiAnalysis: 'Mock analysis: repeated harmful language pattern.',
+          status: 'NEW',
+          mockTag: MOCK_TAG,
+          isMock: true,
+          timestamp: Timestamp.now(),
+        })
+      );
+      alertMutations.push(() =>
+        addDoc(collection(db, 'alerts'), {
+          parentId: ownerId,
+          childName,
+          platform: 'Discord',
+          content: 'Mock: direct threat intent detected.',
+          category: Category.BLACKMAIL,
+          severity: AlertSeverity.CRITICAL,
+          aiAnalysis: 'Mock analysis: explicit threat keyword sequence.',
+          status: 'NEW',
+          mockTag: MOCK_TAG,
+          isMock: true,
+          timestamp: Timestamp.now(),
+        })
+      );
     }
 
-    await addDoc(collection(db, 'activities'), {
-      parentId: ownerId,
-      action: 'Mock Activity',
-      details: 'Injected demo alerts/events package',
-      type: 'SUCCESS',
-      mockTag: MOCK_TAG,
-      isMock: true,
-      timestamp: Timestamp.now(),
-    });
+    const activityMutations: Array<() => Promise<unknown>> = [
+      () =>
+        addDoc(collection(db, 'activities'), {
+          parentId: ownerId,
+          action: 'Mock Activity',
+          details: 'Injected demo alerts/events package',
+          type: 'SUCCESS',
+          mockTag: MOCK_TAG,
+          isMock: true,
+          timestamp: Timestamp.now(),
+        }),
+      () =>
+        addDoc(collection(db, 'activities'), {
+          parentId: ownerId,
+          action: 'Mock Sync',
+          details: 'Device heartbeat timings randomized for test run',
+          type: 'INFO',
+          mockTag: MOCK_TAG,
+          isMock: true,
+          timestamp: Timestamp.now(),
+        }),
+    ];
 
-    await addDoc(collection(db, 'activities'), {
-      parentId: ownerId,
-      action: 'Mock Sync',
-      details: 'Device heartbeat timings randomized for test run',
-      type: 'INFO',
-      mockTag: MOCK_TAG,
-      isMock: true,
-      timestamp: Timestamp.now(),
-    });
-
-    result.eventsAlerts = createdAlerts + 2;
+    const createdAlerts = await runMutationBatch(alertMutations, 'inject mock alerts');
+    const createdActivities = await runMutationBatch(activityMutations, 'inject mock activities');
+    result.eventsAlerts = createdAlerts + createdActivities;
   }
 
   if (selected.has('supervisors')) {
@@ -650,8 +696,20 @@ export const injectSelectedMockData = async (
   }
 
   if (selected.has('operations')) {
-    const advanced = await injectAdvancedOperationalMockData(ownerId);
-    result.operations = advanced.playbooks + advanced.custody + advanced.auditLogs;
+    try {
+      const advanced = await injectAdvancedOperationalMockData(ownerId);
+      result.operations = advanced.playbooks + advanced.custody + advanced.auditLogs;
+    } catch (error) {
+      if (isPermissionDeniedError(error)) {
+        logMockDataNoticeOnce(
+          'mutation-permission-denied:inject-operations',
+          'inject advanced operations skipped due to permission-denied.'
+        );
+        result.operations = 0;
+      } else {
+        throw error;
+      }
+    }
   }
 
   return result;
@@ -985,7 +1043,7 @@ export const injectAdvancedOperationalMockData = async (parentId: string): Promi
     playbooks: [
       {
         id: 'mock-pb-bullying',
-        name: 'درع التنمر',
+        name: 'Ø¯Ø±Ø¹ Ø§Ù„ØªÙ†Ù…Ø±',
         category: Category.BULLYING,
         minSeverity: AlertSeverity.HIGH,
         enabled: true,
@@ -997,7 +1055,7 @@ export const injectAdvancedOperationalMockData = async (parentId: string): Promi
       },
       {
         id: 'mock-pb-threat',
-        name: 'بروتوكول التهديد المباشر',
+        name: 'Ø¨Ø±ÙˆØªÙˆÙƒÙˆÙ„ Ø§Ù„ØªÙ‡Ø¯ÙŠØ¯ Ø§Ù„Ù…Ø¨Ø§Ø´Ø±',
         category: Category.BLACKMAIL,
         minSeverity: AlertSeverity.CRITICAL,
         enabled: true,
@@ -1016,7 +1074,7 @@ export const injectAdvancedOperationalMockData = async (parentId: string): Promi
       playbooks: [
         {
           id: 'mock-pb-bullying',
-          name: 'درع التنمر',
+          name: 'Ø¯Ø±Ø¹ Ø§Ù„ØªÙ†Ù…Ø±',
           category: Category.BULLYING,
           minSeverity: AlertSeverity.HIGH,
           enabled: true,
@@ -1061,3 +1119,4 @@ export const injectAdvancedOperationalMockData = async (parentId: string): Promi
     auditLogs: auditRef?.id ? 1 : 0,
   };
 };
+

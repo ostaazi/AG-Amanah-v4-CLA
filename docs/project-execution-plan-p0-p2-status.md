@@ -138,3 +138,8 @@
 2. P0-4 + P0-5 (Firestore production hardening + encoding fixes).
 3. P0-6 (command reliability + ACK state flow).
 4. بعد الإغلاق: build APKs للتجربة الشاملة.
+
+6. **Remove temporary Gemini location diagnostics banner from Devices screen**
+- Status: `not_started`
+- Note: This is intentionally temporary while Gemini API key rollout is being stabilized across environments.
+- Evidence: `components/DevicesView.tsx:319`, `services/geminiService.ts:196`

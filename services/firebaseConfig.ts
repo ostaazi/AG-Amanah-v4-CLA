@@ -43,6 +43,37 @@ const allowLiveMockMutations =
   String(import.meta.env.VITE_ALLOW_LIVE_MOCK_MUTATIONS || '').toLowerCase() === 'true';
 const autoPurgeMockDataOnAppLoad =
   String(import.meta.env.VITE_AUTO_PURGE_MOCK_DATA || '').toLowerCase() === 'true';
+const MOCK_RUNTIME_OVERRIDE_KEY = 'AMANAH_MOCK_DATA_RUNTIME_OVERRIDE';
+const MOCK_CONFIG_CHANGED_EVENT = 'amanah:mock-config-changed';
+
+const readMockRuntimeOverride = (): boolean | null => {
+  if (typeof window === 'undefined') return null;
+  const raw = String(window.localStorage.getItem(MOCK_RUNTIME_OVERRIDE_KEY) || '').toLowerCase();
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return null;
+};
+
+let mockRuntimeOverride = readMockRuntimeOverride();
+
+const resolveMockDataEnabled = (): boolean =>
+  mockRuntimeOverride !== null
+    ? mockRuntimeOverride
+    : useFirestoreEmulator || allowLiveMockMutations;
+
+const emitMockConfigChanged = () => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent(MOCK_CONFIG_CHANGED_EVENT, {
+      detail: {
+        enabled: resolveMockDataEnabled(),
+        override: mockRuntimeOverride,
+        emulator: useFirestoreEmulator,
+        envDefault: allowLiveMockMutations,
+      },
+    })
+  );
+};
 
 let app: any;
 let dbInstance: any = null;
@@ -70,9 +101,30 @@ try {
 export const db = dbInstance;
 export const auth = authInstance;
 export const isFirestoreEmulatorEnabled = () => useFirestoreEmulator;
-export const canUseMockData = () =>
-  useFirestoreEmulator || allowLiveMockMutations;
+export const isLiveMockMutationsEnvEnabled = () => allowLiveMockMutations;
+export const getMockDataRuntimeOverride = () => mockRuntimeOverride;
+export const getMockDataConfigChangedEventName = () => MOCK_CONFIG_CHANGED_EVENT;
+export const canUseMockData = () => resolveMockDataEnabled();
+export const setMockDataRuntimeOverride = (value: boolean | null) => {
+  mockRuntimeOverride = value;
+  if (typeof window !== 'undefined') {
+    if (value === null) {
+      window.localStorage.removeItem(MOCK_RUNTIME_OVERRIDE_KEY);
+    } else {
+      window.localStorage.setItem(MOCK_RUNTIME_OVERRIDE_KEY, String(value));
+    }
+  }
+  emitMockConfigChanged();
+};
 export const shouldAutoPurgeMockData = () => autoPurgeMockDataOnAppLoad;
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== MOCK_RUNTIME_OVERRIDE_KEY) return;
+    mockRuntimeOverride = readMockRuntimeOverride();
+    emitMockConfigChanged();
+  });
+}
 
 export const checkConnection = async () => {
   return dbInstance ? 'CONNECTED_SECURE' : 'DISCONNECTED';

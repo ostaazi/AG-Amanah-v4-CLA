@@ -20,7 +20,14 @@ import {
   MockDataVerificationReport,
   verifyMockDataCleanup,
 } from '../services/mockDataService';
-import { canUseMockData } from '../services/firebaseConfig';
+import {
+  canUseMockData,
+  getMockDataConfigChangedEventName,
+  getMockDataRuntimeOverride,
+  isFirestoreEmulatorEnabled,
+  isLiveMockMutationsEnvEnabled,
+  setMockDataRuntimeOverride,
+} from '../services/firebaseConfig';
 import { generate2FASecret, getQRCodeUrl, verifyTOTP } from '../services/twoFAService';
 import { logoutUser } from '../services/authService';
 import { ValidationService } from '../services/validationService';
@@ -66,6 +73,10 @@ type ParentContactVerificationState = {
   verified: boolean;
   delivery?: ContactVerificationDelivery;
 };
+
+const DEFAULT_SELECTED_MOCK_DOMAINS: MockDataDomain[] = MOCK_DATA_DOMAINS.filter(
+  (domain) => domain !== 'operations'
+);
 
 const createEmptyContactVerificationState = (): ParentContactVerificationState => ({
   target: '',
@@ -156,7 +167,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   const [linkingChild, setLinkingChild] = useState<Child | null>(null);
   const [linkDeviceUid, setLinkDeviceUid] = useState('');
   const [selectedMockDomains, setSelectedMockDomains] = useState<MockDataDomain[]>([
-    ...MOCK_DATA_DOMAINS,
+    ...DEFAULT_SELECTED_MOCK_DOMAINS,
   ]);
   const [lastMockOperation, setLastMockOperation] = useState<{
     mode: 'inject' | 'delete';
@@ -165,6 +176,13 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     at: Date;
   } | null>(null);
   const [mockCleanupReport, setMockCleanupReport] = useState<MockDataVerificationReport | null>(null);
+  const [mockOpsEnabled, setMockOpsEnabled] = useState<boolean>(() => canUseMockData());
+  const [mockRuntimeOverride, setMockRuntimeOverrideState] = useState<boolean | null>(() =>
+    getMockDataRuntimeOverride()
+  );
+  const mockConfigChangedEventName = useMemo(() => getMockDataConfigChangedEventName(), []);
+  const mockEnvEmulatorEnabled = useMemo(() => isFirestoreEmulatorEnabled(), []);
+  const mockEnvLiveEnabled = useMemo(() => isLiveMockMutationsEnvEnabled(), []);
 
   // Avatar Picker State
   const [pickerConfig, setPickerConfig] = useState<{
@@ -197,6 +215,28 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     setEmailVerificationState(createEmptyContactVerificationState());
     setPhoneVerificationState(createEmptyContactVerificationState());
   }, [currentUser.name, currentUser.email, currentUser.phone]);
+
+  useEffect(() => {
+    const syncMockRuntimeState = () => {
+      setMockOpsEnabled(canUseMockData());
+      setMockRuntimeOverrideState(getMockDataRuntimeOverride());
+    };
+
+    syncMockRuntimeState();
+
+    if (typeof window === 'undefined') return;
+
+    const handleStorage = () => syncMockRuntimeState();
+    const handleMockConfigChange = () => syncMockRuntimeState();
+
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener(mockConfigChangedEventName, handleMockConfigChange as EventListener);
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener(mockConfigChangedEventName, handleMockConfigChange as EventListener);
+    };
+  }, [mockConfigChangedEventName]);
 
   useEffect(() => {
     if (!showParentProfileEditor) {
@@ -814,7 +854,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   );
 
   const isAllMockDomainsSelected = selectedMockDomains.length === MOCK_DATA_DOMAINS.length;
-  const mockOpsEnabled = canUseMockData();
 
   const toggleMockDomain = (domain: MockDataDomain) => {
     setSelectedMockDomains((prev) =>
@@ -826,11 +865,30 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     setSelectedMockDomains(isAllMockDomainsSelected ? [] : [...MOCK_DATA_DOMAINS]);
   };
 
+  const handleSetMockRuntimeOverride = (nextValue: boolean | null) => {
+    setMockDataRuntimeOverride(nextValue);
+    setMockOpsEnabled(canUseMockData());
+    setMockRuntimeOverrideState(getMockDataRuntimeOverride());
+    showSuccessToast(
+      nextValue === null
+        ? lang === 'ar'
+          ? 'تم الرجوع إلى إعدادات البيئة الافتراضية لبيانات mock.'
+          : 'Mock data mode now follows environment defaults.'
+        : nextValue
+          ? lang === 'ar'
+            ? 'تم تفعيل عمليات بيانات mock من داخل التطبيق.'
+            : 'Mock data operations were enabled from app controls.'
+          : lang === 'ar'
+            ? 'تم تعطيل عمليات بيانات mock من داخل التطبيق.'
+            : 'Mock data operations were disabled from app controls.'
+    );
+  };
+
   const showMockOpsDisabledToast = () => {
     showSuccessToast(
       lang === 'ar'
-        ? 'عمليات البيانات الوهمية معطّلة في هذه البيئة. فعّل Emulator أو VITE_ALLOW_LIVE_MOCK_MUTATIONS.'
-        : 'Mock data operations are disabled in this environment. Enable emulator or VITE_ALLOW_LIVE_MOCK_MUTATIONS.'
+        ? 'عمليات البيانات الوهمية معطّلة. فعّلها من أزرار Mock Data Lab أو عبر Emulator/.env.'
+        : 'Mock operations are disabled. Enable them from Mock Data Lab controls or Emulator/.env.'
     );
   };
 
@@ -854,8 +912,45 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           : `Injected mock records (${total})`
       );
     } catch (e: any) {
+      const code = String(e?.code || '');
+      const message = String(e?.message || '');
+      const isPermissionIssue =
+        code === 'permission-denied' || message.includes('Missing or insufficient permissions');
+
+      if (isPermissionIssue && selectedMockDomains.includes('operations')) {
+        const fallbackDomains = selectedMockDomains.filter((domain) => domain !== 'operations');
+        if (fallbackDomains.length > 0) {
+          try {
+            const fallbackResult = await injectSelectedMockData(currentUser.id, fallbackDomains);
+            const merged: Record<MockDataDomain, number> = {
+              ...fallbackResult,
+              operations: 0,
+            } as Record<MockDataDomain, number>;
+            const total = Object.values(merged).reduce((acc, n) => acc + n, 0);
+            setLastMockOperation({ mode: 'inject', result: merged, total, at: new Date() });
+            setMockCleanupReport(null);
+            showSuccessToast(
+              lang === 'ar'
+                ? `تم الحقن جزئيًا (${total}) بدون تشغيل متقدم بسبب الصلاحيات.`
+                : `Injected partially (${total}) without Advanced Ops due to permissions.`
+            );
+            return;
+          } catch (fallbackError) {
+            console.error('Fallback mock inject failed', fallbackError);
+          }
+        }
+      }
+
       if (String(e?.message || '').includes('MOCK_DATA_DISABLED')) {
         showMockOpsDisabledToast();
+        return;
+      }
+      if (isPermissionIssue) {
+        showSuccessToast(
+          lang === 'ar'
+            ? 'فشل حقن البيانات الوهمية بسبب الصلاحيات. تأكد من تسجيل الدخول بالحساب المالك.'
+            : 'Mock inject failed due to permissions. Sign in with the owning parent account.'
+        );
         return;
       }
       console.error('Inject mock data failed', e);
@@ -2394,8 +2489,66 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                 : 'Environment status: mock operations are disabled. Enable emulator or VITE_ALLOW_LIVE_MOCK_MUTATIONS=true.'}
           </p>
         </div>
-
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-indigo-200 bg-white p-4 text-xs font-black text-slate-700 space-y-1">
+              <p>
+                {lang === 'ar'
+                  ? `Emulator: ${mockEnvEmulatorEnabled ? 'مفعّل' : 'غير مفعّل'}`
+                  : `Emulator: ${mockEnvEmulatorEnabled ? 'Enabled' : 'Disabled'}`}
+              </p>
+              <p>
+                {lang === 'ar'
+                  ? `Env default (VITE_ALLOW_LIVE_MOCK_MUTATIONS): ${mockEnvLiveEnabled ? 'مفعّل' : 'غير مفعّل'}`
+                  : `Env default (VITE_ALLOW_LIVE_MOCK_MUTATIONS): ${mockEnvLiveEnabled ? 'Enabled' : 'Disabled'}`}
+              </p>
+              <p>
+                {lang === 'ar'
+                  ? `Runtime override: ${mockRuntimeOverride === null ? 'اتباع env' : mockRuntimeOverride ? 'مفعّل' : 'معطّل'}`
+                  : `Runtime override: ${mockRuntimeOverride === null ? 'Use env default' : mockRuntimeOverride ? 'Enabled' : 'Disabled'}`}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-indigo-200 bg-white p-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleSetMockRuntimeOverride(true)}
+                className={`px-4 py-2 rounded-xl text-[11px] font-black border transition-all ${
+                  mockRuntimeOverride === true
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}
+              >
+                {lang === 'ar' ? 'تفعيل الآن' : 'Enable now'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetMockRuntimeOverride(false)}
+                className={`px-4 py-2 rounded-xl text-[11px] font-black border transition-all ${
+                  mockRuntimeOverride === false
+                    ? 'bg-red-600 text-white border-red-600'
+                    : 'bg-red-50 text-red-700 border-red-200'
+                }`}
+              >
+                {lang === 'ar' ? 'تعطيل الآن' : 'Disable now'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetMockRuntimeOverride(null)}
+                className={`px-4 py-2 rounded-xl text-[11px] font-black border transition-all ${
+                  mockRuntimeOverride === null
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                }`}
+              >
+                {lang === 'ar' ? 'افتراضي البيئة' : 'Use env default'}
+              </button>
+            </div>
+          </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <p className="md:col-span-3 text-[11px] font-bold text-indigo-700">
+            {lang === 'ar'
+              ? 'ملاحظة: "تشغيل متقدم" قد يحتاج صلاحيات Firestore أوسع؛ وهو غير محدد افتراضيًا لتفادي فشل الحقن الكامل.'
+              : 'Note: "Advanced Ops" may require wider Firestore permissions; it is unselected by default to avoid full inject failure.'}
+          </p>
           <button
             type="button"
             onClick={toggleAllMockDomains}

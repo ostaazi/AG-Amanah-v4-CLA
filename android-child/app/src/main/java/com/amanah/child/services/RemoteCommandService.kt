@@ -25,6 +25,7 @@ import androidx.core.app.NotificationCompat
 import com.amanah.child.MainActivity
 import com.amanah.child.R
 import com.amanah.child.receivers.AmanahAdminReceiver
+import com.amanah.child.utils.AlertFilterPolicyManager
 import com.amanah.child.utils.OfflineUnlockManager
 import com.amanah.child.utils.SecurityCortex
 import com.google.firebase.Timestamp
@@ -462,6 +463,12 @@ class RemoteCommandService : Service() {
                     markCommandStatus(childId, "setTextRuleThresholds", status, clearValue = status == "EXECUTED")
                 }
 
+                val alertFilterCmd = commands["setAlertFilterPolicy"] as? Map<*, *>
+                if (shouldHandleCommand(alertFilterCmd, "setAlertFilterPolicy")) {
+                    val status = handleAlertFilterPolicyCommand(alertFilterCmd?.get("value"))
+                    markCommandStatus(childId, "setAlertFilterPolicy", status, clearValue = status == "EXECUTED")
+                }
+
                 val blockCamMicCmd = commands["blockCameraAndMic"] as? Map<*, *>
                 if (shouldHandleCommand(blockCamMicCmd, "blockCameraAndMic")) {
                     val shouldBlockCamMic = blockCamMicCmd?.get("value") == true
@@ -761,6 +768,40 @@ class RemoteCommandService : Service() {
             writeOperationalAlert(
                 platform = "Text Rule Engine",
                 content = "Failed to apply text threshold command on child device.",
+                severity = "MEDIUM"
+            )
+            "FAILED"
+        }
+    }
+
+    private fun handleAlertFilterPolicyCommand(rawConfig: Any?): String {
+        return try {
+            val applied = AlertFilterPolicyManager.applyConfig(this, rawConfig)
+            if (!applied) {
+                writeOperationalAlert(
+                    platform = "Alert Filter Policy",
+                    content = "Alert filter policy command failed due to invalid payload format.",
+                    severity = "MEDIUM"
+                )
+                "FAILED"
+            } else {
+                val resetMode = (rawConfig as? Map<*, *>)?.get("resetToDefault") == true
+                writeOperationalAlert(
+                    platform = "Alert Filter Policy",
+                    content = if (resetMode) {
+                        "Alert filter policy was reset to secure defaults."
+                    } else {
+                        "Alert filter policy was updated and applied before alert dispatch."
+                    },
+                    severity = "LOW"
+                )
+                "EXECUTED"
+            }
+        } catch (e: Exception) {
+            Log.w("AmanahRemoteService", "Alert filter policy command failed: ${e.message}")
+            writeOperationalAlert(
+                platform = "Alert Filter Policy",
+                content = "Failed to apply alert filter policy command on child device.",
                 severity = "MEDIUM"
             )
             "FAILED"

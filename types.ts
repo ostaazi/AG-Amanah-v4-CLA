@@ -245,6 +245,31 @@ export interface MonitoringAlert {
   status?: string;
 }
 
+export type ChildSignalEventType =
+  | 'search_intent'
+  | 'watch_intent'
+  | 'audio_transcript'
+  | 'link_intent'
+  | 'conversation_pattern'
+  | 'behavioral_drift';
+
+export interface ChildSignalEvent {
+  id: string;
+  parentId: string;
+  childId?: string;
+  childName?: string;
+  eventType: ChildSignalEventType;
+  source: string;
+  platform?: string;
+  content: string;
+  normalizedContent?: string;
+  severity?: AlertSeverity;
+  confidence?: number;
+  scenarioHints?: string[];
+  timestamp: Date;
+  context?: Record<string, any>;
+}
+
 export interface ParentMessage {
   id: string;
   familyId: string;

@@ -42,6 +42,7 @@ class AmanahAccessibilityService : AccessibilityService() {
         private const val PARTIAL_PATTERN_DELIM = "@@"
         private const val TEXT_AGG_WINDOW_MS = 12_000L
         private const val TEXT_AGG_MAX_SNIPPETS = 18
+        private const val SIGNAL_EVENT_COOLDOWN_MS = 20_000L
     }
 
     private data class PartialBlockPolicy(
@@ -60,6 +61,7 @@ class AmanahAccessibilityService : AccessibilityService() {
     private var lockOverlayShown = false
     private var lockStateReceiver: BroadcastReceiver? = null
     private val recentTextByPackage = mutableMapOf<String, ArrayDeque<Pair<Long, String>>>()
+    private val recentSignalFingerprintAt = LinkedHashMap<String, Long>()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -208,6 +210,7 @@ class AmanahAccessibilityService : AccessibilityService() {
     private fun processContent(text: String, appName: String) {
         serviceScope.launch {
             val result = SecurityCortex.analyzeText(text)
+            maybeUploadSignalEvent(text, appName, result)
             if (result.isDanger) {
                 uploadAlert(text, appName, result)
                 // Only auto-lock for high-confidence CRITICAL detections (>= 0.95).
@@ -218,6 +221,136 @@ class AmanahAccessibilityService : AccessibilityService() {
                 }
             }
         }
+    }
+
+    private fun maybeUploadSignalEvent(
+        rawText: String,
+        platform: String,
+        analysis: SecurityCortex.AnalysisResult
+    ) {
+        val normalized = SecurityCortex.normalizeTextForAudit(rawText).trim()
+        if (normalized.length < 8) return
+
+        val eventType = resolveSignalEventType(platform, normalized, analysis)
+        if (eventType == null) return
+
+        val fingerprint = "$eventType|${platform.lowercase(Locale.ROOT)}|${normalized.take(90)}"
+        val now = System.currentTimeMillis()
+        synchronized(recentSignalFingerprintAt) {
+            val last = recentSignalFingerprintAt[fingerprint]
+            if (last != null && now - last < SIGNAL_EVENT_COOLDOWN_MS) {
+                return
+            }
+            recentSignalFingerprintAt[fingerprint] = now
+            if (recentSignalFingerprintAt.size > 320) {
+                val iterator = recentSignalFingerprintAt.entries.iterator()
+                repeat(80) {
+                    if (iterator.hasNext()) {
+                        iterator.next()
+                        iterator.remove()
+                    }
+                }
+            }
+        }
+
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        val parentId = prefs.getString("parentId", null) ?: return
+        val childId = prefs.getString("childDocumentId", null) ?: return
+        val childName = prefs.getString("childName", "My Child") ?: "My Child"
+        val scenarioHints = inferSignalScenarioHints(eventType, analysis)
+        val payload = hashMapOf<String, Any>(
+            "parentId" to parentId,
+            "childId" to childId,
+            "childName" to childName,
+            "eventType" to eventType,
+            "source" to "accessibility_text",
+            "platform" to platform,
+            "content" to rawText.take(2000),
+            "normalizedContent" to normalized.take(2000),
+            "confidence" to ((analysis.score * 100f).toInt()).coerceIn(0, 100),
+            "timestamp" to Timestamp.now(),
+            "scenarioHints" to scenarioHints,
+            "context" to hashMapOf(
+                "category" to analysis.category,
+                "severity" to analysis.severity,
+                "isDanger" to analysis.isDanger,
+                "matchedSignals" to analysis.matchedSignals.take(8)
+            )
+        )
+        if (analysis.isDanger) {
+            payload["severity"] = analysis.severity
+        }
+        db.collection("childSignalEvents")
+            .add(payload)
+            .addOnFailureListener { e ->
+                Log.w("AmanahService", "Signal event upload failed: ${e.message}")
+            }
+    }
+
+    private fun resolveSignalEventType(
+        platform: String,
+        normalizedText: String,
+        analysis: SecurityCortex.AnalysisResult
+    ): String? {
+        val pkg = platform.lowercase(Locale.ROOT)
+        val browserLike = pkg.contains("chrome") ||
+            pkg.contains("browser") ||
+            pkg.contains("firefox") ||
+            pkg.contains("opera") ||
+            pkg.contains("edge")
+        val watchLike = pkg.contains("youtube") ||
+            pkg.contains("tiktok") ||
+            pkg.contains("instagram") ||
+            pkg.contains("snapchat") ||
+            pkg.contains("netflix") ||
+            pkg.contains("facebook")
+        val audioLike = pkg.contains("recorder") ||
+            pkg.contains("voice") ||
+            pkg.contains("audio")
+        val hasUrl = normalizedText.contains("http://") ||
+            normalizedText.contains("https://") ||
+            normalizedText.contains("www.") ||
+            Regex("\\b[a-z0-9.-]+\\.(com|net|org|io|me|app|ai|co)\\b").containsMatchIn(normalizedText)
+        val hasSearchIntent = normalizedText.contains("search") ||
+            normalizedText.contains("query") ||
+            normalizedText.contains("ابحث") ||
+            normalizedText.contains("بحث") ||
+            normalizedText.contains("نتائج")
+        val hasAudioTranscriptCue = normalizedText.contains("voice message") ||
+            normalizedText.contains("audio message") ||
+            normalizedText.contains("speech to text") ||
+            normalizedText.contains("رسالة صوتية") ||
+            normalizedText.contains("مذكرة صوتية")
+
+        if (audioLike || hasAudioTranscriptCue) return "audio_transcript"
+        if (hasUrl) return "link_intent"
+        if (browserLike && hasSearchIntent) return "search_intent"
+        if (watchLike) return "watch_intent"
+        if (analysis.isDanger) return "conversation_pattern"
+        return null
+    }
+
+    private fun inferSignalScenarioHints(
+        eventType: String,
+        analysis: SecurityCortex.AnalysisResult
+    ): List<String> {
+        val hints = mutableListOf<String>()
+        when (eventType) {
+            "search_intent" -> hints += listOf("phishing_links", "inappropriate_content")
+            "watch_intent" -> hints += listOf("inappropriate_content", "harmful_challenges")
+            "audio_transcript" -> hints += listOf("bullying", "threat_exposure")
+            "link_intent" -> hints += listOf("phishing_links", "account_theft_fraud")
+            "conversation_pattern" -> hints += listOf("threat_exposure", "sexual_exploitation")
+        }
+        when (analysis.category) {
+            "تحريض على العنف" -> hints += "harmful_challenges"
+            "ابتزاز" -> hints += "threat_exposure"
+            "تواصل مشبوه" -> hints += "sexual_exploitation"
+            "إيذاء النفس" -> hints += "self_harm"
+            "محتوى للبالغين" -> hints += "inappropriate_content"
+            "تنمر إلكتروني" -> hints += "bullying"
+        }
+        return hints.distinct().take(8)
     }
 
     private fun activateLocalEmergencyLock(category: String) {

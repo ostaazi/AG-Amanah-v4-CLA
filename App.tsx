@@ -2,6 +2,7 @@ import React, { useState, useEffect, Suspense, useMemo, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   Child,
+  ChildSignalEvent,
   MonitoringAlert,
   ParentAccount,
   AlertSeverity,
@@ -55,6 +56,7 @@ import {
   addChildToDB,
   subscribeToChildren,
   subscribeToAlerts,
+  subscribeToChildSignalEvents,
   logUserActivity,
   inviteSupervisor,
   saveAlertToDB,
@@ -64,6 +66,8 @@ import {
   sendRemoteCommand,
   backfillChildDeviceOwnership,
   rotatePairingKey,
+  PsychForecastSnapshotInput,
+  savePsychForecastSnapshot,
 } from './services/firestoreService';
 import { buildPulseExecutionEvidenceAlert } from './services/pulseExecutionEvidenceService';
 import { clearSelectedMockData, MOCK_DATA_DOMAINS } from './services/mockDataService';
@@ -276,6 +280,7 @@ const App: React.FC = () => {
   });
   const [children, setChildren] = useState<Child[]>([]);
   const [alerts, setAlerts] = useState<MonitoringAlert[]>([]);
+  const [childSignalEvents, setChildSignalEvents] = useState<ChildSignalEvent[]>([]);
   const [pairingRequests, setPairingRequests] = useState<PairingRequest[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [modes, setModes] = useState<CustomMode[]>([
@@ -470,6 +475,7 @@ const App: React.FC = () => {
 
   const handleSaveExecutionEvidence = async (payload: {
     childId: string;
+    childIds?: string[];
     childName: string;
     scenarioId: string;
     scenarioTitle: string;
@@ -509,6 +515,12 @@ const App: React.FC = () => {
     });
 
     return recordId;
+  };
+
+  const handlePersistPsychForecastSnapshot = async (payload: PsychForecastSnapshotInput) => {
+    const parentId = auth?.currentUser?.uid || currentUser.id;
+    if (!parentId || parentId === 'guest') return;
+    await savePsychForecastSnapshot(parentId, payload);
   };
 
   const handleApplyMode = async (childId: string, modeId?: string) => {
@@ -937,6 +949,7 @@ const App: React.FC = () => {
         setIsAuthenticated(false);
         setChildren([]);
         setAlerts([]);
+        setChildSignalEvents([]);
       }
       setTimeout(() => setIsAuthChecking(false), 2500);
     });
@@ -1057,6 +1070,9 @@ const App: React.FC = () => {
       alertsLoaded = true;
       checkLoading();
     });
+    const unsubSignalEvents = subscribeToChildSignalEvents(ownerId, (events) => {
+      setChildSignalEvents(events);
+    });
 
     const unsubPairing = subscribeToPairingRequests(ownerId, (data) => {
       setPairingRequests(data);
@@ -1068,6 +1084,7 @@ const App: React.FC = () => {
     return () => {
       unsubChildren();
       unsubAlerts();
+      unsubSignalEvents();
       unsubPairing();
       clearTimeout(safetyTimer);
     };
@@ -1210,6 +1227,8 @@ const App: React.FC = () => {
                 FEATURE_FLAGS.advancedDefense ? (
                   <ProactiveDefenseView
                     children={children}
+                    alerts={alerts}
+                    signalEvents={childSignalEvents}
                     lang={lang}
                     parentId={currentUser.id}
                     autoLockInAutomationEnabled={autoLockInAutomationEnabled}
@@ -1490,13 +1509,16 @@ const App: React.FC = () => {
                   <PsychologicalInsightView
                     theme="light"
                     child={children[0]}
+                    childrenList={children}
                     alerts={alerts}
+                    signalEvents={childSignalEvents}
                     autoLockInAutomationEnabled={autoLockInAutomationEnabled}
                     allLocksDisabled={allLocksDisabled}
                     onAcceptPlan={handleAcceptSuggestedMode}
                     onApplyModeToChild={handleApplyMode}
                     onPlanExecutionResult={handlePlanExecutionResult}
                     onSaveExecutionEvidence={handleSaveExecutionEvidence}
+                    onPersistForecastSnapshot={handlePersistPsychForecastSnapshot}
                   />
                 ) : (
                   <Navigate to="/" replace />

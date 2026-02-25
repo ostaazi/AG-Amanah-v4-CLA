@@ -193,8 +193,90 @@ export const auditCodeSecurity = async (code: string) => {
   }
 };
 
-export const analyzeLocationSafety = async (lat: number, lng: number) => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+let locationSafetyGeminiDisabled = false;
+let locationSafetyWarned = false;
+
+export type LocationSafetyStatus =
+  | 'cloud'
+  | 'fallback_missing_key'
+  | 'fallback_invalid_key'
+  | 'fallback_error';
+
+export interface LocationSafetyIntel {
+  text: string;
+  mapsLinks: Array<{
+    uri: string;
+    title: string;
+  }>;
+  status: LocationSafetyStatus;
+  troubleshooting?: string;
+  temporaryNotice?: boolean;
+}
+
+const getGeminiApiKey = (): string => String(import.meta.env.VITE_GEMINI_API_KEY || '').trim();
+
+const hasUsableGeminiApiKey = (): boolean => {
+  const key = getGeminiApiKey();
+  if (!key) return false;
+  const lowered = key.toLowerCase();
+  if (
+    lowered.includes('your_') ||
+    lowered.includes('replace_') ||
+    lowered.includes('placeholder') ||
+    lowered.includes('example')
+  ) {
+    return false;
+  }
+  return true;
+};
+
+const isApiKeyInvalidError = (error: any): boolean => {
+  const code = String(error?.error?.code || error?.code || '');
+  const message = String(error?.error?.message || error?.message || error || '').toLowerCase();
+  return code === '400' && (message.includes('api key not valid') || message.includes('api_key_invalid'));
+};
+
+const locationFallback = (lat: number, lng: number, status: LocationSafetyStatus): LocationSafetyIntel => {
+  let troubleshooting = 'Cloud location intelligence is temporarily unavailable.';
+  if (status === 'fallback_missing_key') {
+    troubleshooting = 'Missing VITE_GEMINI_API_KEY in .env.local. Add key then restart dev server.';
+  } else if (status === 'fallback_invalid_key') {
+    troubleshooting = 'Invalid VITE_GEMINI_API_KEY. Replace key in .env.local then restart dev server.';
+  }
+
+  return {
+    text: 'Location safety AI is unavailable. Live GPS tracking is still active.',
+    mapsLinks: [
+      {
+        uri: `https://maps.google.com/?q=${lat},${lng}`,
+        title: 'Open in Google Maps',
+      },
+    ],
+    status,
+    troubleshooting,
+    temporaryNotice: true,
+  };
+};
+
+const warnLocationSafetyFallbackOnce = (message: string, error?: unknown) => {
+  if (locationSafetyWarned) return;
+  locationSafetyWarned = true;
+  console.warn(message, error || '');
+};
+
+export const analyzeLocationSafety = async (lat: number, lng: number): Promise<LocationSafetyIntel> => {
+  if (!hasUsableGeminiApiKey()) {
+    warnLocationSafetyFallbackOnce(
+      '[Amanah] Gemini location analysis disabled: missing/placeholder VITE_GEMINI_API_KEY. Add it to .env.local then restart the dev server.'
+    );
+    return locationFallback(lat, lng, 'fallback_missing_key');
+  }
+
+  if (locationSafetyGeminiDisabled) {
+    return locationFallback(lat, lng, 'fallback_invalid_key');
+  }
+
+  const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
   try {
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -211,10 +293,23 @@ export const analyzeLocationSafety = async (lat: number, lng: number) => {
         uri: chunk.maps.uri,
         title: chunk.maps.title || 'Safe Zone',
       }));
-    return { text: response.text || 'No analysis.', mapsLinks };
+    return {
+      text: response.text || 'No analysis.',
+      mapsLinks,
+      status: 'cloud',
+    };
   } catch (error) {
-    console.error('Location safety analysis failed', error);
-    return { text: 'Service unavailable.', mapsLinks: [] };
+    if (isApiKeyInvalidError(error)) {
+      locationSafetyGeminiDisabled = true;
+      warnLocationSafetyFallbackOnce(
+        '[Amanah] Gemini location analysis disabled: invalid VITE_GEMINI_API_KEY. Update key in .env.local then restart the dev server.',
+        error
+      );
+      return locationFallback(lat, lng, 'fallback_invalid_key');
+    }
+
+    console.warn('[Amanah] Location safety AI fallback activated.', error);
+    return locationFallback(lat, lng, 'fallback_error');
   }
 };
 

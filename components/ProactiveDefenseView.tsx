@@ -3,16 +3,22 @@ import {
   AlertSeverity,
   Category,
   Child,
+  ChildSignalEvent,
   CommandPriority,
+  MonitoringAlert,
   ProactiveDefenseConfig,
   SafetyPlaybook,
 } from '../types';
 import { ICONS } from '../constants';
 import { DefenseAction, getDefenseActionsWithPlaybooks } from '../services/ruleEngineService';
 import { fetchPlaybooks, sendRemoteCommand } from '../services/firestoreService';
+import { buildUnifiedPsychSignals } from '../services/psychSignalFusionService';
+import { buildPsychAutomationGate, PsychAutomationCommand } from '../services/psychAutomationGateService';
 
 interface ProactiveDefenseViewProps {
   children: Child[];
+  alerts?: MonitoringAlert[];
+  signalEvents?: ChildSignalEvent[];
   lang: 'ar' | 'en';
   parentId: string;
   autoLockInAutomationEnabled?: boolean;
@@ -77,6 +83,8 @@ const applyConfigToDefenseActions = (
 
 const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
   children,
+  alerts = [],
+  signalEvents = [],
   lang,
   parentId,
   autoLockInAutomationEnabled = true,
@@ -98,6 +106,53 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
     [children, selectedChildId]
   );
 
+  const activeScenarioId = useMemo(() => {
+    if (selectedCategory === Category.BULLYING) return 'bullying' as const;
+    if (selectedCategory === Category.SELF_HARM) return 'self_harm' as const;
+    if (selectedCategory === Category.PHISHING_LINK) return 'phishing_links' as const;
+    if (selectedCategory === Category.SCAM) return 'crypto_scams' as const;
+    if (selectedCategory === Category.BLACKMAIL) return 'threat_exposure' as const;
+    if (selectedCategory === Category.VIOLENCE) return 'harmful_challenges' as const;
+    if (selectedCategory === Category.SEXUAL_EXPLOITATION) return 'sexual_exploitation' as const;
+    return 'sexual_exploitation' as const;
+  }, [selectedCategory]);
+
+  const selectedChildAlerts = useMemo(
+    () =>
+      alerts.filter(
+        (alert) => alert.childId === selectedChild?.id || alert.childName === selectedChild?.name
+      ),
+    [alerts, selectedChild?.id, selectedChild?.name]
+  );
+
+  const selectedChildSignalEvents = useMemo(
+    () =>
+      signalEvents.filter(
+        (event) => event.childId === selectedChild?.id || event.childName === selectedChild?.name
+      ),
+    [signalEvents, selectedChild?.id, selectedChild?.name]
+  );
+
+  const signalFusion = useMemo(
+    () =>
+      buildUnifiedPsychSignals({
+        child: selectedChild,
+        alerts: selectedChildAlerts,
+        signalEvents: selectedChildSignalEvents,
+      }),
+    [selectedChild, selectedChildAlerts, selectedChildSignalEvents]
+  );
+
+  const automationGate = useMemo(
+    () =>
+      buildPsychAutomationGate({
+        activeScenarioId,
+        dominantSeverity: selectedSeverity,
+        trajectories: signalFusion.trajectories,
+      }),
+    [activeScenarioId, selectedSeverity, signalFusion.trajectories]
+  );
+
   const persistedConfig = useMemo(
     () => cloneDefenseConfig(selectedChild?.defenseConfig || defaultDefenseConfig),
     [selectedChild?.id, selectedChild?.defenseConfig]
@@ -116,11 +171,18 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
 
   const actions = useMemo(() => {
     const baseActions = getDefenseActionsWithPlaybooks(selectedCategory, selectedSeverity, playbooks, {
-        allowAutoLock: autoLockInAutomationEnabled && !allLocksDisabled,
-      });
-    return applyConfigToDefenseActions(baseActions, config);
+      allowAutoLock: autoLockInAutomationEnabled && !allLocksDisabled,
+      confidence: automationGate.ruleEngineConfidence,
+    });
+    const configuredActions = applyConfigToDefenseActions(baseActions, config);
+    return configuredActions.filter((action) => {
+      const decision = automationGate.commandDecisions[action.command as PsychAutomationCommand];
+      return decision ? decision.allowed : true;
+    });
   }, [
     allLocksDisabled,
+    automationGate.commandDecisions,
+    automationGate.ruleEngineConfidence,
     autoLockInAutomationEnabled,
     config,
     playbooks,
@@ -174,6 +236,7 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
       lang === 'ar'
         ? 'تم تعطيل جميع الأقفال مؤقتًا/دائمًا من الإعدادات. لن يتم إرسال أي أوامر قفل.'
         : 'All locks are disabled from settings (temporary/permanent). No lock commands will be sent.',
+    trajectoryGateLabel: lang === 'ar' ? 'بوابة المسارات' : 'Trajectory Gate',
   };
 
   if (!selectedChild) {
@@ -225,6 +288,14 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
   };
 
   const runActionsNow = async () => {
+    if (actions.length === 0) {
+      setLastRunSummary(
+        lang === 'ar'
+          ? 'لا توجد أوامر متاحة للتنفيذ بعد قيود البوابة والإعدادات.'
+          : 'No commands available to execute after gate/settings constraints.'
+      );
+      return;
+    }
     setIsApplying(true);
     try {
       const results = await Promise.allSettled(
@@ -441,6 +512,18 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
               {t.autoLockDisabledNote}
             </div>
           )}
+          <div
+            className={`rounded-xl px-3 py-2 text-[11px] font-black border ${
+              automationGate.lockEnabled
+                ? 'text-rose-700 bg-rose-50 border-rose-200'
+                : automationGate.containmentEnabled
+                  ? 'text-amber-700 bg-amber-50 border-amber-200'
+                  : 'text-slate-700 bg-slate-100 border-slate-200'
+            }`}
+          >
+            <span className="uppercase tracking-wide">{t.trajectoryGateLabel}: </span>
+            {lang === 'ar' ? automationGate.summaryAr : automationGate.summaryEn}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {actions.map((action) => (
               <div
@@ -454,6 +537,13 @@ const ProactiveDefenseView: React.FC<ProactiveDefenseViewProps> = ({
               </div>
             ))}
           </div>
+          {actions.length === 0 && (
+            <div className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-[11px] font-black text-slate-700">
+              {lang === 'ar'
+                ? 'لا توجد أوامر مقترحة بعد تطبيق قيود الإعدادات + بوابة المسارات.'
+                : 'No suggested commands remain after applying settings and trajectory gate constraints.'}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-3">
