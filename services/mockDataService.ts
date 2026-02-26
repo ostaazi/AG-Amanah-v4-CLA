@@ -745,7 +745,7 @@ export const clearSelectedMockData = async (
   };
 
   const childrenSnap = await listChildrenByParent(ownerId);
-  const mockChildren = childrenSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
+  const mockChildren = childrenSnap.docs.filter((d: any) => isMockRecord(d.data?.()));
 
   if (selected.has('children')) {
     result.children = await runMutationBatch(
@@ -798,14 +798,14 @@ export const clearSelectedMockData = async (
 
   if (selected.has('eventsAlerts')) {
     const alertsSnap = await listAlertsByParent(ownerId);
-    const mockAlerts = alertsSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
+    const mockAlerts = alertsSnap.docs.filter((d: any) => isMockRecord(d.data?.()));
     const removedAlerts = await runMutationBatch(
       mockAlerts.map((d: any) => () => deleteDoc(doc(db, 'alerts', d.id))),
       'clear mock alerts'
     );
 
     const activitiesSnap = await listActivitiesByParent(ownerId);
-    const mockActivities = activitiesSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
+    const mockActivities = activitiesSnap.docs.filter((d: any) => isMockRecord(d.data?.()));
     const removedActivities = await runMutationBatch(
       mockActivities.map((d: any) => () => deleteDoc(doc(db, 'activities', d.id))),
       'clear mock activities'
@@ -816,7 +816,7 @@ export const clearSelectedMockData = async (
 
   if (selected.has('supervisors')) {
     const supervisorsSnap = await listSupervisorsByParent(ownerId);
-    const mockSup = supervisorsSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
+    const mockSup = supervisorsSnap.docs.filter((d: any) => isMockRecord(d.data?.()));
     result.supervisors = await runMutationBatch(
       mockSup.map((d: any) => () => deleteDoc(doc(db, 'supervisors', d.id))),
       'clear mock supervisors'
@@ -828,10 +828,11 @@ export const clearSelectedMockData = async (
 
     const playbookRef = doc(db, 'playbooks', ownerId);
     const playbookSnap = await safeGetDoc(playbookRef, 'read mock playbook');
-    if (playbookSnap.exists() && playbookSnap.data()?.mockTag === MOCK_TAG) {
+    if (playbookSnap.exists() && isMockRecord(playbookSnap.data?.())) {
       try {
         await updateDoc(playbookRef, {
           mockTag: deleteField(),
+          isMock: deleteField(),
           playbooks: deleteField(),
           updatedAt: deleteField(),
         });
@@ -850,7 +851,7 @@ export const clearSelectedMockData = async (
 
     const custodyQ = query(collection(db, 'custody'), where('parentId', '==', ownerId));
     const custodySnap = await safeGetDocs(custodyQ, 'list mock custody');
-    const mockCustody = custodySnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
+    const mockCustody = custodySnap.docs.filter((d: any) => isMockRecord(d.data?.()));
     removed += await runMutationBatch(
       mockCustody.map((d: any) => () => deleteDoc(doc(db, 'custody', d.id))),
       'clear mock custody'
@@ -858,7 +859,7 @@ export const clearSelectedMockData = async (
 
     const auditQ = query(collection(db, 'auditLogs'), where('parentId', '==', ownerId));
     const auditSnap = await safeGetDocs(auditQ, 'list mock audit logs');
-    const mockAudit = auditSnap.docs.filter((d: any) => d.data()?.mockTag === MOCK_TAG);
+    const mockAudit = auditSnap.docs.filter((d: any) => isMockRecord(d.data?.()));
     removed += await runMutationBatch(
       mockAudit.map((d: any) => () => deleteDoc(doc(db, 'auditLogs', d.id))),
       'clear mock audit logs'
@@ -1119,4 +1120,3 @@ export const injectAdvancedOperationalMockData = async (parentId: string): Promi
     auditLogs: auditRef?.id ? 1 : 0,
   };
 };
-

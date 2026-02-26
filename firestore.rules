@@ -131,7 +131,20 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.parentId is string;
       allow read: if resourceParentMatchesAuth();
       allow delete: if resourceParentMatchesAuth()
-        && resource.data.mockTag == 'AMANAH_FAKE_DATA';
+        && (
+          resource.data.mockTag == 'AMANAH_FAKE_DATA'
+          || resource.data.isMock == true
+        );
+    }
+
+    match /childSignalEvents/{eventId} {
+      allow create: if requestParentMatchesAuth();
+      allow read, update, delete: if resourceParentMatchesAuth();
+    }
+
+    match /psychForecastSnapshots/{snapshotId} {
+      allow create: if requestParentMatchesAuth();
+      allow read, update, delete: if resourceParentMatchesAuth();
     }
 
     match /playbooks/{parentId} {
