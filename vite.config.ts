@@ -47,6 +47,9 @@ export default defineConfig(({ mode }) => {
         registerType: 'autoUpdate',
         manifest: false,
         workbox: {
+          skipWaiting: true,
+          clientsClaim: true,
+          cleanupOutdatedCaches: true,
           globPatterns: ['**/*.{css,html,ico,png,svg,woff,woff2}'],
           globIgnores: ['**/group1-shard*', '**/model.min-*'],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
