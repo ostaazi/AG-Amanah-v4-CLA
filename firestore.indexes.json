@@ -15,6 +15,20 @@
       ]
     },
     {
+      "collectionGroup": "childSignalEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "parentId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "timestamp",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "custody",
       "queryScope": "COLLECTION",
       "fields": [

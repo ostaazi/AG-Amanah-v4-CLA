@@ -1276,7 +1276,7 @@ export const subscribeToChildSignalEvents = (
                 timestamp: raw.timestamp?.toDate?.() || new Date(raw.timestamp || Date.now()),
               } as ChildSignalEvent;
             })
-            .filter(Boolean)
+            .filter((event): event is ChildSignalEvent => event !== null)
             .sort(
               (a: ChildSignalEvent, b: ChildSignalEvent) =>
                 new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
