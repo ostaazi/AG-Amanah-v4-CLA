@@ -4,6 +4,16 @@ dist
 .env.local
 *.log
 tmp_backup_*
+tmp_*
+tmp-*
+android/build
+android/**/build
+android-child/build
+android-child/**/build
+android-parent-build
+android-child-build
+.gradle
+.gph
 session_restart_context.json
 tmp.vite.config.mjs
 .git

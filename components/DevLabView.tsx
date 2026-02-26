@@ -155,7 +155,7 @@ const DevLabView: React.FC<DevLabViewProps> = ({ lang = 'ar', currentUserId = ''
       },
       {
         path: 'services/firebaseConfig.ts',
-        content: 'const apiKey = "AIzaSyD3pZgmPyzMh7jZXLNLC8kAdWRbkRf1mbc";',
+        content: 'const apiKey = "FIREBASE_API_KEY_FROM_ENV";',
         isVulnerable: true,
       },
     ];

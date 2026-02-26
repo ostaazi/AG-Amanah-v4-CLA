@@ -43,7 +43,7 @@ A comprehensive security audit of the Amanah Parental Control application identi
 
 ```typescript
 const firebaseConfig = {
-  apiKey: 'AIzaSyD3pZgmPyzMh7jZXLNLC8kAdWRbkRf1mbc', // EXPOSED
+  apiKey: '<HARDCODED_FIREBASE_KEY_EXAMPLE>', // EXPOSED
   // ... other hardcoded credentials
 };
 ```
