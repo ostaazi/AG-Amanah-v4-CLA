@@ -1,10 +1,11 @@
-# ── Stage 1: Build the Vite frontend ─────────────────────────────────────────
-FROM node:20-alpine AS build
+﻿# Stage 1: Build the Vite frontend
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 COPY . .
-# Vite embeds VITE_* env vars at build time — pass them via Coolify build args
+
+# Vite embeds VITE_* env vars at build time. Pass via Coolify build args.
 ARG VITE_FIREBASE_API_KEY
 ARG VITE_FIREBASE_AUTH_DOMAIN
 ARG VITE_FIREBASE_PROJECT_ID
@@ -22,9 +23,9 @@ ARG VITE_PHONE_VERIFICATION_PREFER_GATEWAY
 ARG VITE_SMS_TEXTBELT_KEY
 RUN npm run build
 
-# ── Stage 2: Production image (nginx + node email webhook) ───────────────────
+# Stage 2: Production image (nginx + node email webhook)
 FROM nginx:alpine
-RUN apk add --no-cache nodejs npm supervisor
+RUN apk add --no-cache nodejs supervisor
 
 # Copy built frontend
 COPY --from=build /app/dist /usr/share/nginx/html
