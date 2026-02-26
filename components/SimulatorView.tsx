@@ -11,21 +11,21 @@ import { translations } from '../translations';
 const AR_SCENARIOS = [
   {
     id: 'blackmail',
-    label: 'Financial Blackmail',
+    label: 'ابتزاز مالي',
     color: 'bg-slate-800 hover:bg-slate-900',
-    text: "I have your private images. Send money now or I will share them publicly.",
+    text: 'لدي صورك الخاصة، أرسل المال الآن وإلا سأنشرها علنًا.',
   },
   {
     id: 'bullying',
-    label: 'Bullying and Toxic Abuse',
+    label: 'تنمر وإساءة سامة',
     color: 'bg-slate-800 hover:bg-slate-900',
-    text: 'You are worthless and everyone hates you. Hurt yourself and disappear.',
+    text: 'أنت بلا قيمة والجميع يكرهك. لا أحد يريدك.',
   },
   {
     id: 'grooming',
-    label: 'Predator Grooming',
+    label: 'استدراج مفترس',
     color: 'bg-slate-800 hover:bg-slate-900',
-    text: 'Open your camera, go alone, and keep this secret between us.',
+    text: 'افتح الكاميرا واذهب وحدك، وابقِ هذا الأمر سرًا بيننا.',
   },
 ];
 
@@ -66,6 +66,21 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
   const [latency, setLatency] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hiddenImgRef = useRef<HTMLImageElement>(null);
+  const t = translations[lang];
+  const engineLabelMap: Record<'IDLE' | 'SCANNING' | 'STRUCK' | 'SAFE', string> =
+    lang === 'ar'
+      ? {
+          IDLE: 'جاهز',
+          SCANNING: 'فحص',
+          STRUCK: 'إنذار',
+          SAFE: 'آمن',
+        }
+      : {
+          IDLE: 'IDLE',
+          SCANNING: 'SCAN',
+          STRUCK: 'ALERT',
+          SAFE: 'SAFE',
+        };
 
   useEffect(() => {
     loadVisualSentinelModel();
@@ -244,7 +259,7 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
   return (
     <div
       className="max-w-xl mx-auto space-y-8 pb-40 animate-in fade-in"
-      dir="ltr"
+      dir={lang === 'ar' ? 'rtl' : 'ltr'}
     >
       {displayImage && (
         <img
@@ -266,20 +281,14 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
         }`}
       >
         <div className="text-7xl mb-6 drop-shadow-lg relative z-10">
-          {engineStatus === 'SCANNING'
-            ? 'SCAN'
-            : engineStatus === 'STRUCK'
-              ? 'ALERT'
-              : engineStatus === 'SAFE'
-                ? 'SAFE'
-                : 'IDLE'}
+          {engineLabelMap[engineStatus]}
         </div>
         <h2 className="text-4xl font-black tracking-tighter mb-2 relative z-10">
           Turbo Vision V2.1
         </h2>
         <div className="flex items-center justify-center gap-4 opacity-60 relative z-10">
           <span className="text-[10px] font-black uppercase tracking-[0.3em]">
-            Hybrid Edge/Cloud Engine
+            {t.hybridEngine}
           </span>
           {latency && (
             <span className="px-3 py-1 rounded-full text-[9px] font-mono font-black bg-white/20">
@@ -310,7 +319,7 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
           ) : (
             <div className="text-center">
               <span className="text-4xl opacity-50 block">IMG</span>
-              <p className="text-xs font-black text-slate-400">Upload suspicious image</p>
+              <p className="text-xs font-black text-slate-400">{t.uploadZone}</p>
             </div>
           )}
         </div>
@@ -319,8 +328,8 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
           rows={2}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Message text..."
-          className="w-full p-6 rounded-[2rem] bg-slate-50 border-2 border-slate-100 outline-none font-bold text-right"
+          placeholder={t.textInputPlaceholder}
+          className={`w-full p-6 rounded-[2rem] bg-slate-50 border-2 border-slate-100 outline-none font-bold ${lang === 'ar' ? 'text-right' : 'text-left'}`}
         />
 
         <div className="grid grid-cols-3 gap-2">
@@ -340,7 +349,7 @@ const SimulatorView: React.FC<SimulatorViewProps> = ({ children, parentId, lang 
           disabled={loading || (!text.trim() && !displayImage)}
           className="w-full py-6 bg-indigo-600 text-white rounded-[2.5rem] font-black text-lg active:scale-95 shadow-xl"
         >
-          {loading ? 'Analyzing...' : 'Run Hybrid Simulation'}
+          {loading ? t.analyzing : t.runSim}
         </button>
       </div>
     </div>
