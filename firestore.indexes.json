@@ -65,6 +65,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "senderId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "childId",
           "order": "ASCENDING"
         },
