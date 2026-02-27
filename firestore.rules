@@ -10,10 +10,6 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == parentId;
     }
 
-    function isPairingRequester(requestId) {
-      return isAuthenticated() && request.auth.uid == requestId;
-    }
-
     function requestParentMatchesAuth() {
       return isAuthenticated()
         && request.resource.data.parentId is string
@@ -86,17 +82,7 @@ service cloud.firestore {
           && request.resource.data.parentId == parentId
           && request.resource.data.status == 'PENDING';
 
-        // Allow the child device (requester) to re-submit a PENDING request
-        // (e.g. after a failed first attempt or app reinstall with same UID)
-        allow update: if isOwner(parentId)
-          || (
-            isPairingRequester(requestId)
-            && request.resource.data.status == 'PENDING'
-            && request.resource.data.parentId == parentId
-          );
-
-        allow read: if isOwner(parentId) || isPairingRequester(requestId);
-        allow delete: if isOwner(parentId);
+        allow read, update, delete: if isOwner(parentId);
       }
     }
 

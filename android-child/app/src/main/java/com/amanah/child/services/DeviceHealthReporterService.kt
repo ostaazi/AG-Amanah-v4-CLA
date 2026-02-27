@@ -139,23 +139,6 @@ class DeviceHealthReporterService : Service() {
         val networkType = getNetworkType()
         val networkStrength = getNetworkStrength(networkType)
         val locationSnapshot = getLocationSnapshot()
-        val accessibilityEnabled = isAccessibilityEnabled()
-        val deviceAdminEnabled = isDeviceAdminEnabled()
-        val cameraPermissionGranted = isPermissionGranted(Manifest.permission.CAMERA)
-        val microphonePermissionGranted = isPermissionGranted(Manifest.permission.RECORD_AUDIO)
-        val screenCaptureReady = ScreenCaptureSessionStore.hasSession()
-        val controlReadiness = hashMapOf<String, Any?>(
-            "accessibilityEnabled" to accessibilityEnabled,
-            "deviceAdminEnabled" to deviceAdminEnabled,
-            "remoteServiceRunning" to true,
-            "cameraPermissionGranted" to cameraPermissionGranted,
-            "microphonePermissionGranted" to microphonePermissionGranted,
-            "screenCaptureReady" to screenCaptureReady,
-            "appControlReady" to accessibilityEnabled,
-            "liveCameraReady" to cameraPermissionGranted,
-            "liveMicrophoneReady" to microphonePermissionGranted,
-            "updatedAt" to now
-        )
 
         val payload = hashMapOf<String, Any?>(
             "childId" to childId,
@@ -173,17 +156,13 @@ class DeviceHealthReporterService : Service() {
             "lastHeartbeat" to now,
             "reportedAt" to now,
             "permissionsGranted" to getPermissionStatuses(),
-            "isAccessibilityEnabled" to accessibilityEnabled,
-            "isDeviceAdminEnabled" to deviceAdminEnabled,
+            "isAccessibilityEnabled" to isAccessibilityEnabled(),
+            "isDeviceAdminEnabled" to isDeviceAdminEnabled(),
             "isRemoteServiceRunning" to true,
             "appVersion" to getAppVersion(),
             "osVersion" to "Android ${Build.VERSION.RELEASE}",
             "deviceModel" to "${Build.MANUFACTURER} ${Build.MODEL}",
-            "locationPermissionGranted" to hasLocationPermission(),
-            "cameraPermissionGranted" to cameraPermissionGranted,
-            "microphonePermissionGranted" to microphonePermissionGranted,
-            "screenCaptureReady" to screenCaptureReady,
-            "controlReadiness" to controlReadiness
+            "locationPermissionGranted" to hasLocationPermission()
         )
 
         if (locationSnapshot != null) {
@@ -350,10 +329,6 @@ class DeviceHealthReporterService : Service() {
         return fine || coarse
     }
 
-    private fun isPermissionGranted(permission: String): Boolean {
-        return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
-    }
-
     private fun getPermissionStatuses(): List<HashMap<String, Any>> {
         val requiredPermissions = listOf(
             Manifest.permission.ACCESS_FINE_LOCATION to "Location (Fine)",
@@ -405,34 +380,7 @@ class DeviceHealthReporterService : Service() {
             "batteryLevel" to ((healthData["batteryLevel"] as? Int) ?: 0),
             "signalStrength" to toSignalBars(strength),
             "status" to if ((healthData["networkType"] as? String) == "none") "offline" else "online",
-            "lastSeenAt" to Timestamp.now(),
-            "controlReadiness" to (
-                (healthData["controlReadiness"] as? Map<*, *>)?.let { readiness ->
-                    hashMapOf(
-                        "accessibilityEnabled" to ((readiness["accessibilityEnabled"] as? Boolean) ?: false),
-                        "deviceAdminEnabled" to ((readiness["deviceAdminEnabled"] as? Boolean) ?: false),
-                        "remoteServiceRunning" to ((readiness["remoteServiceRunning"] as? Boolean) ?: false),
-                        "cameraPermissionGranted" to ((readiness["cameraPermissionGranted"] as? Boolean) ?: false),
-                        "microphonePermissionGranted" to ((readiness["microphonePermissionGranted"] as? Boolean) ?: false),
-                        "screenCaptureReady" to ((readiness["screenCaptureReady"] as? Boolean) ?: false),
-                        "appControlReady" to ((readiness["appControlReady"] as? Boolean) ?: false),
-                        "liveCameraReady" to ((readiness["liveCameraReady"] as? Boolean) ?: false),
-                        "liveMicrophoneReady" to ((readiness["liveMicrophoneReady"] as? Boolean) ?: false),
-                        "updatedAt" to Timestamp.now()
-                    )
-                } ?: hashMapOf(
-                    "accessibilityEnabled" to false,
-                    "deviceAdminEnabled" to false,
-                    "remoteServiceRunning" to true,
-                    "cameraPermissionGranted" to false,
-                    "microphonePermissionGranted" to false,
-                    "screenCaptureReady" to false,
-                    "appControlReady" to false,
-                    "liveCameraReady" to false,
-                    "liveMicrophoneReady" to false,
-                    "updatedAt" to Timestamp.now()
-                )
-            )
+            "lastSeenAt" to Timestamp.now()
         )
 
         val location = healthData["location"]

@@ -73,10 +73,11 @@
                         android:background="@drawable/bg_input"
                         android:fontFamily="monospace"
                         android:gravity="center"
-                        android:hint="AB12CD34EF56"
-                        android:inputType="textVisiblePassword|textNoSuggestions"
-                        android:maxLength="12"
+                        android:hint="000000"
+                        android:inputType="number"
+                        android:maxLength="6"
                         android:paddingEnd="64dp"
+                        android:textAllCaps="true"
                         android:textColor="#D1A23D"
                         android:textColorHint="#64748B"
                         android:textSize="32sp"
@@ -140,20 +141,9 @@
                     android:id="@+id/btnEnableAccessibility"
                     android:layout_width="match_parent"
                     android:layout_height="64dp"
-                    android:layout_marginTop="12dp"
                     android:backgroundTint="#1E293B"
                     android:text="Update Accessibility Permissions"
                     android:textColor="#FFFFFF" />
-
-                <Button
-                    android:id="@+id/btnResetPairing"
-                    android:layout_width="match_parent"
-                    android:layout_height="56dp"
-                    android:layout_marginTop="12dp"
-                    android:backgroundTint="#7F1D1D"
-                    android:text="Reset Pairing"
-                    android:textColor="#FFFFFF"
-                    android:textStyle="bold" />
             </LinearLayout>
 
         </LinearLayout>

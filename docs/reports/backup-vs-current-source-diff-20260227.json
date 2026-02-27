@@ -1,0 +1,539 @@
+﻿{
+    "generatedAt":  "2026-02-27 17:19:55",
+    "backupRoot":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427",
+    "currentRoot":  "d:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai",
+    "backupCount":  218,
+    "currentCount":  187,
+    "missingCount":  38,
+    "newCount":  7,
+    "changedCount":  49,
+    "missing":  [
+                    {
+                        "value":  "android\\app\\src\\main\\assets\\public\\assets\\inception_v3-Dwi2GgVA.js",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "android\\app\\src\\main\\assets\\public\\assets\\index-C8qPfkRJ.js",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "android\\app\\src\\main\\assets\\public\\assets\\mobilenet_v2_mid-DKR-Gadq.js",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "android\\app\\src\\main\\assets\\public\\assets\\mobilenet_v2-DIuPcyiT.js",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "android\\app\\src\\main\\assets\\public\\assets\\style-BCM4_Hp7.css",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\DnsFilterVpnService.kt",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\VulnerabilityScannerService.kt",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\utils\\AlertFilterPolicyManager.kt",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\utils\\OfflineUnlockManager.kt",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "android-child\\app\\src\\main\\res\\drawable\\bg_lock_overlay_card.xml",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "android-child\\docs\\SecurityCortex-Assessment.md",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "components\\ComplianceDashboardView.tsx",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "components\\parent\\VulnerabilityCenterView.tsx",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "components\\SystemHealthView.tsx",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "components\\TextRuleThresholdsLabCard.tsx",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "components\\VisualThresholdsLabCard.tsx",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "docs\\p0-sprint-checklist.md",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "docs\\project-execution-plan-p0-p2-status.md",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "docs\\project-ideas-from-ai-studio-conversation.md",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "docs\\visual_model_continuous_improvement_plan.md",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "docs\\zero-quality-gates-runbook.md",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "scripts\\artifacts-path.mjs",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "scripts\\check-mojibake.mjs",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "scripts\\quality-gates.mjs",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "services\\dateTimeFormat.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "services\\modelThresholdDefaults.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "services\\offlineUnlockService.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "services\\parentAndroidSecurityService.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "services\\psychAutomationGateService.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "services\\psychContextEngine.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "services\\psychForecastService.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "services\\psychSignalFusionService.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "services\\vulnerabilityIntelService.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "tests\\components\\proactiveDefenseView.test.tsx",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "tests\\scripts\\checkMojibakeScript.test.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "tests\\scripts\\qualityGatesScript.test.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "tests\\services\\psychAutomationGateService.test.ts",
+                        "SideIndicator":  "\u003c="
+                    },
+                    {
+                        "value":  "tests\\services\\psychSignalFusionService.test.ts",
+                        "SideIndicator":  "\u003c="
+                    }
+                ],
+    "newInCurrent":  [
+                         {
+                             "value":  "android\\app\\src\\main\\assets\\public\\assets\\inception_v3-D3bADHiG.js",
+                             "SideIndicator":  "=\u003e"
+                         },
+                         {
+                             "value":  "android\\app\\src\\main\\assets\\public\\assets\\index-CmriA-R0.js",
+                             "SideIndicator":  "=\u003e"
+                         },
+                         {
+                             "value":  "android\\app\\src\\main\\assets\\public\\assets\\mobilenet_v2_mid-BmsnLBJN.js",
+                             "SideIndicator":  "=\u003e"
+                         },
+                         {
+                             "value":  "android\\app\\src\\main\\assets\\public\\assets\\mobilenet_v2-DuyyUcX_.js",
+                             "SideIndicator":  "=\u003e"
+                         },
+                         {
+                             "value":  "android\\app\\src\\main\\assets\\public\\assets\\style-DC9lSQN5.css",
+                             "SideIndicator":  "=\u003e"
+                         },
+                         {
+                             "value":  "docs\\reports\\backup-vs-current-source-diff-20260227.json",
+                             "SideIndicator":  "=\u003e"
+                         },
+                         {
+                             "value":  "docs\\walkthrough-format-analysis.md",
+                             "SideIndicator":  "=\u003e"
+                         }
+                     ],
+    "changed":  [
+                    {
+                        "Rel":  "android\\app\\src\\main\\assets\\public\\index.html",
+                        "BackupSize":  1934,
+                        "CurrentSize":  1941,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android\\app\\src\\main\\assets\\public\\index.html",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android\\app\\src\\main\\assets\\public\\index.html"
+                    },
+                    {
+                        "Rel":  "android\\app\\src\\main\\assets\\public\\sw.js",
+                        "BackupSize":  1969,
+                        "CurrentSize":  1969,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android\\app\\src\\main\\assets\\public\\sw.js",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android\\app\\src\\main\\assets\\public\\sw.js"
+                    },
+                    {
+                        "Rel":  "android\\app\\src\\main\\res\\values\\strings.xml",
+                        "BackupSize":  294,
+                        "CurrentSize":  302,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android\\app\\src\\main\\res\\values\\strings.xml",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android\\app\\src\\main\\res\\values\\strings.xml"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\google-services.json",
+                        "BackupSize":  652,
+                        "CurrentSize":  672,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\google-services.json",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\google-services.json"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\AndroidManifest.xml",
+                        "BackupSize":  5302,
+                        "CurrentSize":  4304,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\AndroidManifest.xml",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\AndroidManifest.xml"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\MainActivity.kt",
+                        "BackupSize":  52931,
+                        "CurrentSize":  40406,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\MainActivity.kt",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\MainActivity.kt"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\receivers\\BootCompletedReceiver.kt",
+                        "BackupSize":  2202,
+                        "CurrentSize":  1930,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\receivers\\BootCompletedReceiver.kt",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\receivers\\BootCompletedReceiver.kt"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\AmanahAccessibilityService.kt",
+                        "BackupSize":  38286,
+                        "CurrentSize":  17706,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\AmanahAccessibilityService.kt",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\AmanahAccessibilityService.kt"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\AppUsageTrackerService.kt",
+                        "BackupSize":  9630,
+                        "CurrentSize":  7674,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\AppUsageTrackerService.kt",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\AppUsageTrackerService.kt"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\DeviceHealthReporterService.kt",
+                        "BackupSize":  16619,
+                        "CurrentSize":  12956,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\DeviceHealthReporterService.kt",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\DeviceHealthReporterService.kt"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\RemoteCommandService.kt",
+                        "BackupSize":  54899,
+                        "CurrentSize":  28183,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\RemoteCommandService.kt",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\RemoteCommandService.kt"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\ScreenGuardianService.kt",
+                        "BackupSize":  56424,
+                        "CurrentSize":  17755,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\ScreenGuardianService.kt",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\ScreenGuardianService.kt"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\TamperDetectionService.kt",
+                        "BackupSize":  11520,
+                        "CurrentSize":  11183,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\TamperDetectionService.kt",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\services\\TamperDetectionService.kt"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\java\\com\\amanah\\child\\utils\\SecurityCortex.kt",
+                        "BackupSize":  104459,
+                        "CurrentSize":  14897,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\utils\\SecurityCortex.kt",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\java\\com\\amanah\\child\\utils\\SecurityCortex.kt"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\res\\drawable\\ic_shield_logo.xml",
+                        "BackupSize":  3129,
+                        "CurrentSize":  1517,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\res\\drawable\\ic_shield_logo.xml",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\res\\drawable\\ic_shield_logo.xml"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\res\\layout\\activity_main.xml",
+                        "BackupSize":  9824,
+                        "CurrentSize":  7984,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\res\\layout\\activity_main.xml",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\res\\layout\\activity_main.xml"
+                    },
+                    {
+                        "Rel":  "android-child\\app\\src\\main\\res\\values\\strings.xml",
+                        "BackupSize":  313,
+                        "CurrentSize":  306,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\android-child\\app\\src\\main\\res\\values\\strings.xml",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\android-child\\app\\src\\main\\res\\values\\strings.xml"
+                    },
+                    {
+                        "Rel":  "App.tsx",
+                        "BackupSize":  63466,
+                        "CurrentSize":  61790,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\App.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\App.tsx"
+                    },
+                    {
+                        "Rel":  "components\\AdvisorView.tsx",
+                        "BackupSize":  6604,
+                        "CurrentSize":  7864,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\AdvisorView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\AdvisorView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\AlertsView.tsx",
+                        "BackupSize":  8769,
+                        "CurrentSize":  8691,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\AlertsView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\AlertsView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\ChainOfCustodyView.tsx",
+                        "BackupSize":  3586,
+                        "CurrentSize":  3529,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\ChainOfCustodyView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\ChainOfCustodyView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\ChildAppView.tsx",
+                        "BackupSize":  24741,
+                        "CurrentSize":  24714,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\ChildAppView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\ChildAppView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\DashboardView.tsx",
+                        "BackupSize":  15458,
+                        "CurrentSize":  15357,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\DashboardView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\DashboardView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\DevicesView.tsx",
+                        "BackupSize":  25679,
+                        "CurrentSize":  20982,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\DevicesView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\DevicesView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\DevLabView.tsx",
+                        "BackupSize":  19536,
+                        "CurrentSize":  19026,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\DevLabView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\DevLabView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\EvidenceVaultView.tsx",
+                        "BackupSize":  45328,
+                        "CurrentSize":  42877,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\EvidenceVaultView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\EvidenceVaultView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\IncidentsCenterView.tsx",
+                        "BackupSize":  6015,
+                        "CurrentSize":  5926,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\IncidentsCenterView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\IncidentsCenterView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\LiveMonitorView.tsx",
+                        "BackupSize":  30095,
+                        "CurrentSize":  29952,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\LiveMonitorView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\LiveMonitorView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\NotificationToast.tsx",
+                        "BackupSize":  3944,
+                        "CurrentSize":  4115,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\NotificationToast.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\NotificationToast.tsx"
+                    },
+                    {
+                        "Rel":  "components\\parent\\DeviceCommandControl.tsx",
+                        "BackupSize":  13689,
+                        "CurrentSize":  6531,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\parent\\DeviceCommandControl.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\parent\\DeviceCommandControl.tsx"
+                    },
+                    {
+                        "Rel":  "components\\parent\\ParentOpsConsoleView.tsx",
+                        "BackupSize":  22164,
+                        "CurrentSize":  21582,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\parent\\ParentOpsConsoleView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\parent\\ParentOpsConsoleView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\ProactiveDefenseView.tsx",
+                        "BackupSize":  23481,
+                        "CurrentSize":  19597,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\ProactiveDefenseView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\ProactiveDefenseView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\PsychologicalInsightView.tsx",
+                        "BackupSize":  235800,
+                        "CurrentSize":  199104,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\PsychologicalInsightView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\PsychologicalInsightView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\SettingsView.tsx",
+                        "BackupSize":  128921,
+                        "CurrentSize":  114609,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\SettingsView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\SettingsView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\SimulatorView.tsx",
+                        "BackupSize":  12478,
+                        "CurrentSize":  12777,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\SimulatorView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\SimulatorView.tsx"
+                    },
+                    {
+                        "Rel":  "components\\SystemStatusBar.tsx",
+                        "BackupSize":  2851,
+                        "CurrentSize":  2841,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\SystemStatusBar.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\SystemStatusBar.tsx"
+                    },
+                    {
+                        "Rel":  "components\\VisualBenchmarkView.tsx",
+                        "BackupSize":  21647,
+                        "CurrentSize":  3794,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\components\\VisualBenchmarkView.tsx",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\components\\VisualBenchmarkView.tsx"
+                    },
+                    {
+                        "Rel":  "firestore.indexes.json",
+                        "BackupSize":  1575,
+                        "CurrentSize":  992,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\firestore.indexes.json",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\firestore.indexes.json"
+                    },
+                    {
+                        "Rel":  "firestore.rules",
+                        "BackupSize":  10130,
+                        "CurrentSize":  4062,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\firestore.rules",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\firestore.rules"
+                    },
+                    {
+                        "Rel":  "nginx.conf",
+                        "BackupSize":  2276,
+                        "CurrentSize":  2128,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\nginx.conf",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\nginx.conf"
+                    },
+                    {
+                        "Rel":  "package.json",
+                        "BackupSize":  2483,
+                        "CurrentSize":  2012,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\package.json",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\package.json"
+                    },
+                    {
+                        "Rel":  "services\\firebaseConfig.ts",
+                        "BackupSize":  4694,
+                        "CurrentSize":  2696,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\services\\firebaseConfig.ts",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\services\\firebaseConfig.ts"
+                    },
+                    {
+                        "Rel":  "services\\firestoreService.ts",
+                        "BackupSize":  65548,
+                        "CurrentSize":  57583,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\services\\firestoreService.ts",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\services\\firestoreService.ts"
+                    },
+                    {
+                        "Rel":  "services\\geminiService.ts",
+                        "BackupSize":  14322,
+                        "CurrentSize":  11381,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\services\\geminiService.ts",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\services\\geminiService.ts"
+                    },
+                    {
+                        "Rel":  "services\\mockDataService.ts",
+                        "BackupSize":  36532,
+                        "CurrentSize":  27644,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\services\\mockDataService.ts",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\services\\mockDataService.ts"
+                    },
+                    {
+                        "Rel":  "services\\pulseExecutionEvidenceService.ts",
+                        "BackupSize":  5802,
+                        "CurrentSize":  5849,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\services\\pulseExecutionEvidenceService.ts",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\services\\pulseExecutionEvidenceService.ts"
+                    },
+                    {
+                        "Rel":  "services\\validationService.ts",
+                        "BackupSize":  19728,
+                        "CurrentSize":  6068,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\services\\validationService.ts",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\services\\validationService.ts"
+                    },
+                    {
+                        "Rel":  "tests\\services\\validationService.test.ts",
+                        "BackupSize":  9709,
+                        "CurrentSize":  3520,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\tests\\services\\validationService.test.ts",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\tests\\services\\validationService.test.ts"
+                    },
+                    {
+                        "Rel":  "vite.config.ts",
+                        "BackupSize":  2710,
+                        "CurrentSize":  2614,
+                        "BackupPath":  "D:\\Projects\\Amanah backups\\project-backup-20260227-033427\\vite.config.ts",
+                        "CurrentPath":  "D:\\Projects\\copy2-of-latest-copy-of-copy4-of-amanah_-parental-control-ai\\vite.config.ts"
+                    }
+                ]
+}

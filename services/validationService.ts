@@ -51,8 +51,6 @@ export const ValidationService = {
             'runVulnerabilityScan',
             'setVisualThresholds',
             'setTextRuleThresholds',
-            'blockCamera',
-            'blockMicrophone',
             'blockCameraAndMic',
             'notifyParent',
             'startLiveStream',

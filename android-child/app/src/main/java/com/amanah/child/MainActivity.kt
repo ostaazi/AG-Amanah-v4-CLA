@@ -30,12 +30,10 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.google.firebase.FirebaseApp
 import com.amanah.child.receivers.AmanahAdminReceiver
 import com.amanah.child.services.AppUsageTrackerService
 import com.amanah.child.services.DeviceHealthReporterService
 import com.amanah.child.services.DnsFilterVpnService
-import com.amanah.child.services.LiveMediaStreamService
 import com.amanah.child.services.RemoteCommandService
 import com.amanah.child.services.ScreenCaptureSessionStore
 import com.amanah.child.services.ScreenGuardianService
@@ -47,17 +45,9 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.Timestamp
-import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.*
 
 class MainActivity : AppCompatActivity() {
-    companion object {
-        private val PAIRING_KEY_PATTERN = Regex("^[A-Za-z0-9]{6,12}$")
-    }
 
     private lateinit var statusText: TextView
     private lateinit var shieldIcon: ImageView
@@ -68,8 +58,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var offlineUnlockButton: Button
     private lateinit var offlineUnlockStatus: TextView
     private lateinit var btnStartProtection: Button
-    private val pairingPollHandler = Handler(Looper.getMainLooper())
-    private var pairingApprovalPollRunnable: Runnable? = null
     
     private val db by lazy { FirebaseFirestore.getInstance() }
     private val auth by lazy { FirebaseAuth.getInstance() }
@@ -124,20 +112,13 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "فعّل Amanah Shield للرصد الحقيقي", Toast.LENGTH_LONG).show()
             }
 
-            findViewById<Button>(R.id.btnResetPairing).setOnClickListener {
-                clearStoredPairingState(
-                    reason = "manual_reset",
-                    userMessage = "تمت إعادة تعيين الربط على هذا الجهاز. يمكنك الربط من جديد."
-                )
-            }
-
             findViewById<Button>(R.id.btnSubmitPairing).setOnClickListener {
                 val etKey = findViewById<EditText>(R.id.etPairingKey)
                 val key = etKey.text.toString().trim()
-                if (isValidPairingKey(key)) {
+                if (key.length == 6 && key.all { it.isDigit() }) {
                     performCloudPairing(key)
                 } else {
-                    Toast.makeText(this, "يرجى إدخال مفتاح ربط صحيح من 6 إلى 12 حرفًا أو رقمًا", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "يرجى إدخال كود صحيح من 6 أرقام", Toast.LENGTH_SHORT).show()
                 }
             }
 
@@ -166,7 +147,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         commandListener?.remove()
-        pairingApprovalPollRunnable?.let { pairingPollHandler.removeCallbacks(it) }
         unregisterLockStateReceiver()
         super.onDestroy()
     }
@@ -317,28 +297,6 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_LONG
             ).show()
         }
-        val cameraGranted = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.CAMERA
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!cameraGranted) {
-            Toast.makeText(
-                this,
-                "يرجى منح صلاحية الكاميرا لتفعيل البث المباشر من كاميرا الطفل.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-        val micGranted = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!micGranted) {
-            Toast.makeText(
-                this,
-                "يرجى منح صلاحية الميكروفون لتفعيل البث الصوتي المباشر.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
     }
 
     private fun ensureFirebaseAuth(onComplete: (() -> Unit)? = null) {
@@ -368,8 +326,6 @@ class MainActivity : AppCompatActivity() {
         val permissions = mutableListOf<String>()
         permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
         permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION)
-        permissions.add(Manifest.permission.CAMERA)
-        permissions.add(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -436,120 +392,18 @@ class MainActivity : AppCompatActivity() {
     private fun checkPairingStatus() {
         val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
         val childId = prefs.getString("childDocumentId", null)
-        val parentId = prefs.getString("parentId", null)
-        if (childId.isNullOrBlank() || parentId.isNullOrBlank()) {
-            showPairingUi("بانتظار الربط...")
-            return
-        }
-
-        statusText.text = "جاري التحقق من الربط..."
-        ensureFirebaseAuth {
-            validateStoredPairing(parentId, childId)
-        }
-    }
-
-    private fun validateStoredPairing(parentId: String, childId: String) {
-        db.collection("children").document(childId).get()
-            .addOnSuccessListener { snapshot ->
-                if (!snapshot.exists()) {
-                    clearStoredPairingState(
-                        reason = "child_doc_missing",
-                        userMessage = "تم العثور على ربط محلي قديم وغير صالح. يرجى الربط من جديد."
-                    )
-                    return@addOnSuccessListener
-                }
-
-                val remoteParentId = snapshot.getString("parentId")
-                if (remoteParentId.isNullOrBlank() || remoteParentId != parentId) {
-                    clearStoredPairingState(
-                        reason = "parent_mismatch",
-                        userMessage = "بيانات الربط المحلية لا تطابق حالة الخادم. يرجى الربط من جديد."
-                    )
-                    return@addOnSuccessListener
-                }
-
-                showProtectedUi()
-                startLocalMonitoringServices()
-                restoreVisualMonitoringState()
+        if (childId != null) {
+            pairingSection.visibility = View.GONE
+            protectedSection.visibility = View.VISIBLE
+            startLocalMonitoringServices()
+            restoreVisualMonitoringState()
+            ensureFirebaseAuth {
                 claimDeviceOwnership(childId)
                 startRemoteCommandService()
             }
-            .addOnFailureListener { e ->
-                Log.w("AmanahPairing", "Stored pairing validation failed: ${e.message}")
-                // Claim ownership even on read failure - this may fix the read permission
-                claimDeviceOwnership(childId)
-                // Preserve local state on transient network/auth failures.
-                showProtectedUi("تعذر التحقق من الخادم الآن. الحماية المحلية مستمرة.")
-                startLocalMonitoringServices()
-                restoreVisualMonitoringState()
-                startRemoteCommandService()
-            }
-    }
-
-    private fun showPairingUi(statusMessage: String) {
-        pairingSection.visibility = View.VISIBLE
-        protectedSection.visibility = View.GONE
-        statusText.text = statusMessage
-        btnStartProtection.text = "Enable Visual Monitoring"
-        btnStartProtection.isEnabled = true
-    }
-
-    private fun showProtectedUi(statusMessage: String = "الجهاز مربوط ومحمي") {
-        pairingSection.visibility = View.GONE
-        protectedSection.visibility = View.VISIBLE
-        statusText.text = statusMessage
-    }
-
-    private fun clearStoredPairingState(reason: String, userMessage: String? = null) {
-        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
-        prefs.edit()
-            .remove("parentId")
-            .remove("childDocumentId")
-            .remove("childName")
-            .remove("visualMonitoringEnabled")
-            .remove("pendingStreamMode")
-            .remove("liveStreamActive")
-            .remove("preferredVideoSource")
-            .remove("preferredAudioSource")
-            .apply()
-
-        try {
-            stopService(Intent(this, RemoteCommandService::class.java))
-        } catch (_: Exception) {
-        }
-        try {
-            stopService(Intent(this, ScreenGuardianService::class.java))
-        } catch (_: Exception) {
-        }
-        try {
-            stopService(Intent(this, LiveMediaStreamService::class.java))
-        } catch (_: Exception) {
-        }
-        try {
-            stopService(Intent(this, AppUsageTrackerService::class.java))
-        } catch (_: Exception) {
-        }
-        try {
-            stopService(Intent(this, TamperDetectionService::class.java))
-        } catch (_: Exception) {
-        }
-        try {
-            stopService(Intent(this, DeviceHealthReporterService::class.java))
-        } catch (_: Exception) {
-        }
-        try {
-            stopService(Intent(this, VulnerabilityScannerService::class.java))
-        } catch (_: Exception) {
-        }
-        try {
-            stopService(Intent(this, DnsFilterVpnService::class.java))
-        } catch (_: Exception) {
-        }
-
-        Log.i("AmanahPairing", "Stored pairing cleared. reason=$reason")
-        showPairingUi("بانتظار الربط...")
-        userMessage?.let {
-            Toast.makeText(this, it, Toast.LENGTH_LONG).show()
+        } else {
+            pairingSection.visibility = View.VISIBLE
+            protectedSection.visibility = View.GONE
         }
     }
 
@@ -618,19 +472,8 @@ class MainActivity : AppCompatActivity() {
             val uid = auth.currentUser?.uid
             Log.d("AmanahPairing", "Authenticated as UID: $uid")
             Log.d("AmanahPairing", "Fetching path: /pairingKeys/$key")
-
-            db.enableNetwork().addOnCompleteListener {
-                fetchPairingKeyDocument(key, retryOnOffline = true)
-            }
-        }
-    }
-
-    private fun fetchPairingKeyDocument(
-        key: String,
-        retryOnOffline: Boolean,
-        allowRestFallback: Boolean = true
-    ) {
-        db.collection("pairingKeys").document(key).get()
+            
+            db.collection("pairingKeys").document(key).get()
                 .addOnSuccessListener { doc ->
                     if (doc == null || !doc.exists()) {
                         handlePairingFailure()
@@ -650,93 +493,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 .addOnFailureListener { e ->
                     Log.e("AmanahPairing", "Fetch failed", e)
-                    val rawMessage = e.message.orEmpty()
-                    val isOfflineError =
-                        rawMessage.contains("offline", ignoreCase = true) ||
-                            rawMessage.contains("unavailable", ignoreCase = true)
-                    if (isOfflineError && retryOnOffline) {
-                        db.enableNetwork().addOnCompleteListener {
-                            fetchPairingKeyDocument(key, retryOnOffline = false, allowRestFallback = allowRestFallback)
-                        }
-                        return@addOnFailureListener
-                    }
-                    if (isOfflineError && allowRestFallback) {
-                        attemptRestPairingLookup(key)
-                        return@addOnFailureListener
-                    }
                     runOnUiThread {
-                        val msg = when {
-                            rawMessage.contains("PERMISSION_DENIED", ignoreCase = true) ->
-                                "خطأ في الصلاحيات. يرجى تفعيل الدخول المجهول في Firebase."
-                            isOfflineError && !isDeviceOnline() ->
-                                "لا يوجد اتصال إنترنت فعلي على جهاز الطفل. تأكد من البيانات أو الواي فاي ثم أعد المحاولة."
-                            isOfflineError ->
-                                "تعذر الوصول إلى خادم الربط الآن رغم وجود الشبكة. أعد المحاولة بعد ثوانٍ أو افتح التطبيق مجددًا."
-                            else -> "خطأ في الاتصال: ${e.message}"
-                        }
+                        val msg = if (e.message?.contains("PERMISSION_DENIED") == true)
+                            "خطأ في الصلاحيات. يرجى تفعيل الدخول المجهول."
+                        else "خطأ في الاتصال: ${e.message}"
                         Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                         statusText.text = "فشل الاتصال"
                     }
                 }
-    }
-
-    private fun isValidPairingKey(key: String): Boolean = PAIRING_KEY_PATTERN.matches(key)
-
-    private fun attemptRestPairingLookup(key: String) {
-        statusText.text = "جاري تجربة مسار ربط بديل..."
-        if (!hasNetworkConnectionHint()) {
-            Toast.makeText(
-                this,
-                "لا يوجد اتصال شبكة ظاهر على جهاز الطفل. تأكد من البيانات أو الواي فاي ثم أعد المحاولة.",
-                Toast.LENGTH_LONG
-            ).show()
-            statusText.text = "فشل الاتصال"
-            return
         }
-        val currentUser = auth.currentUser
-        if (currentUser == null) {
-            Toast.makeText(this, "تعذر إنشاء جلسة مصادقة قبل الربط.", Toast.LENGTH_LONG).show()
-            statusText.text = "فشل الاتصال"
-            return
-        }
-
-        currentUser.getIdToken(false)
-            .addOnSuccessListener { tokenResult ->
-                val token = tokenResult.token.orEmpty()
-                Thread {
-                    val result = runCatching { fetchPairingKeyViaRest(key, token) }.getOrElse { error ->
-                        RestPairingLookupResult(errorMessage = error.message ?: "REST lookup failed")
-                    }
-                    runOnUiThread {
-                        when {
-                            result.parentId.isNullOrBlank() -> {
-                                Toast.makeText(
-                                    this,
-                                    result.errorMessage ?: "تعذر الوصول إلى مفتاح الربط من الخادم.",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                                statusText.text = "فشل الاتصال"
-                            }
-                            result.expiresAtSeconds != null &&
-                                Timestamp.now().seconds > result.expiresAtSeconds -> {
-                                Toast.makeText(this, "كود منتهي الصلاحية", Toast.LENGTH_LONG).show()
-                                statusText.text = "كود منتهي"
-                            }
-                            else -> {
-                                sendPairingRequest(result.parentId, key, useRestFallback = true)
-                            }
-                        }
-                    }
-                }.start()
-            }
-            .addOnFailureListener { error ->
-                Toast.makeText(
-                    this,
-                    "فشل الحصول على رمز المصادقة: ${error.message}",
-                    Toast.LENGTH_LONG
-                ).show()
-                statusText.text = "فشل الاتصال"
-            }
     }
 
     private fun handlePairingFailure() {
@@ -745,13 +510,13 @@ class MainActivity : AppCompatActivity() {
         statusText.text = "فشل الربط"
     }
 
-    private fun sendPairingRequest(parentId: String, key: String, useRestFallback: Boolean = false) {
+    private fun sendPairingRequest(parentId: String, key: String) {
         val deviceName = Build.MODEL
         val requestId = auth.currentUser?.uid ?: return
 
         statusText.text = "بانتظار موافقة الأب..."
         
-        val requestData: HashMap<String, Any> = hashMapOf(
+        val requestData = hashMapOf(
             "parentId" to parentId,
             "childName" to "جهاز $deviceName",
             "model" to deviceName,
@@ -759,11 +524,6 @@ class MainActivity : AppCompatActivity() {
             "status" to "PENDING",
             "timestamp" to Timestamp.now()
         )
-
-        if (useRestFallback) {
-            sendPairingRequestViaRest(parentId, requestId, requestData)
-            return
-        }
 
         db.collection("parents").document(parentId)
             .collection("pairingRequests").document(requestId)
@@ -774,43 +534,6 @@ class MainActivity : AppCompatActivity() {
             .addOnFailureListener { e ->
                 Log.e("AmanahPairing", "Failed to send request", e)
                 Toast.makeText(this, "فشل إرسال الطلب: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-    }
-
-    private fun sendPairingRequestViaRest(
-        parentId: String,
-        requestId: String,
-        requestData: HashMap<String, Any>
-    ) {
-        val currentUser = auth.currentUser ?: return
-        currentUser.getIdToken(false)
-            .addOnSuccessListener { tokenResult ->
-                val token = tokenResult.token.orEmpty()
-                Thread {
-                    val error = runCatching {
-                        createPairingRequestViaRest(parentId, requestId, requestData, token)
-                    }.exceptionOrNull()
-                    runOnUiThread {
-                        if (error != null) {
-                            Toast.makeText(
-                                this,
-                                "فشل إرسال طلب الربط عبر المسار البديل: ${error.message}",
-                                Toast.LENGTH_LONG
-                            ).show()
-                            statusText.text = "فشل الاتصال"
-                        } else {
-                            startPairingApprovalPolling(parentId, requestId)
-                        }
-                    }
-                }.start()
-            }
-            .addOnFailureListener { error ->
-                Toast.makeText(
-                    this,
-                    "تعذر إصدار رمز التحقق للربط: ${error.message}",
-                    Toast.LENGTH_LONG
-                ).show()
-                statusText.text = "فشل الاتصال"
             }
     }
 
@@ -839,62 +562,8 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    private fun startPairingApprovalPolling(parentId: String, requestId: String) {
-        pairingApprovalPollRunnable?.let { pairingPollHandler.removeCallbacks(it) }
-        val runnable = object : Runnable {
-            override fun run() {
-                val currentUser = auth.currentUser
-                if (currentUser == null) {
-                    statusText.text = "فشل الاتصال"
-                    return
-                }
-
-                currentUser.getIdToken(false)
-                    .addOnSuccessListener { tokenResult ->
-                        val token = tokenResult.token.orEmpty()
-                        Thread {
-                            val result = runCatching {
-                                fetchPairingApprovalViaRest(parentId, requestId, token)
-                            }.getOrElse { error ->
-                                RestPairingApprovalResult(
-                                    status = null,
-                                    childDocumentId = null,
-                                    errorMessage = error.message
-                                )
-                            }
-                            runOnUiThread {
-                                when (result.status) {
-                                    "APPROVED" -> {
-                                        pairingApprovalPollRunnable?.let { pairingPollHandler.removeCallbacks(it) }
-                                        if (!result.childDocumentId.isNullOrBlank()) {
-                                            finalizePairing(parentId, result.childDocumentId)
-                                        } else {
-                                            statusText.text = "فشل الربط"
-                                        }
-                                    }
-                                    "REJECTED" -> {
-                                        pairingApprovalPollRunnable?.let { pairingPollHandler.removeCallbacks(it) }
-                                        Toast.makeText(this@MainActivity, "تم رفض طلب الربط من قبل الأب", Toast.LENGTH_LONG).show()
-                                        statusText.text = "تم الرفض"
-                                        statusText.setTextColor(Color.RED)
-                                    }
-                                    else -> pairingPollHandler.postDelayed(this, 3000L)
-                                }
-                            }
-                        }.start()
-                    }
-                    .addOnFailureListener {
-                        pairingPollHandler.postDelayed(this, 5000L)
-                    }
-            }
-        }
-        pairingApprovalPollRunnable = runnable
-        pairingPollHandler.post(runnable)
-    }
-
     private fun finalizePairing(parentId: String, childId: String) {
         val deviceName = Build.MODEL
-        pairingApprovalPollRunnable?.let { pairingPollHandler.removeCallbacks(it) }
         getSharedPreferences("AmanahPrefs", MODE_PRIVATE).edit()
             .putString("parentId", parentId)
             .putString("childDocumentId", childId)
@@ -912,14 +581,8 @@ class MainActivity : AppCompatActivity() {
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
                     Log.e("AmanahCommands", "Listener error: ${e.message}")
-                    commandListener?.remove()
-                    commandListener = null
                     Handler(Looper.getMainLooper()).postDelayed({
-                        if (!isFinishing && !isDestroyed) {
-                            // Re-claim ownership before retrying, may fix permission issues
-                            claimDeviceOwnership(childId)
-                            startListeningForCommands(childId)
-                        }
+                        if (!isFinishing && !isDestroyed) startListeningForCommands(childId)
                     }, 5000)
                     return@addSnapshotListener
                 }
@@ -1460,154 +1123,5 @@ class MainActivity : AppCompatActivity() {
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
             caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
-
-    private fun hasNetworkConnectionHint(): Boolean {
-        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
-        val network = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(network) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-    }
-
-    private data class RestPairingLookupResult(
-        val parentId: String? = null,
-        val expiresAtSeconds: Long? = null,
-        val errorMessage: String? = null
-    )
-
-    private data class RestPairingApprovalResult(
-        val status: String? = null,
-        val childDocumentId: String? = null,
-        val errorMessage: String? = null
-    )
-
-    private fun fetchPairingKeyViaRest(key: String, idToken: String): RestPairingLookupResult {
-        val response = performFirestoreRestRequest(
-            documentPath = "pairingKeys/$key",
-            idToken = idToken,
-            method = "GET"
-        )
-        if (response.responseCode == 404) {
-            return RestPairingLookupResult(errorMessage = "كود الربط غير موجود")
-        }
-        if (response.responseCode !in 200..299) {
-            throw IllegalStateException(response.errorMessage ?: "REST get failed (${response.responseCode})")
-        }
-
-        val json = JSONObject(response.body)
-        val fields = json.optJSONObject("fields") ?: JSONObject()
-        val parentId = fields.optJSONObject("parentId")?.optString("stringValue")
-        val expiresAtRaw = fields.optJSONObject("expiresAt")?.optString("timestampValue")
-        val expiresAtSeconds = expiresAtRaw?.let {
-            runCatching { Timestamp(Date.from(java.time.Instant.parse(it))).seconds }.getOrNull()
-        }
-        return RestPairingLookupResult(parentId = parentId, expiresAtSeconds = expiresAtSeconds)
-    }
-
-    private fun createPairingRequestViaRest(
-        parentId: String,
-        requestId: String,
-        requestData: HashMap<String, Any>,
-        idToken: String
-    ) {
-        val timestamp = (requestData["timestamp"] as? Timestamp)?.toDate()?.toInstant()?.toString()
-            ?: java.time.Instant.now().toString()
-        val payload = JSONObject().apply {
-            put("fields", JSONObject().apply {
-                put("parentId", fireString(parentId))
-                put("childName", fireString(requestData["childName"]?.toString().orEmpty()))
-                put("model", fireString(requestData["model"]?.toString().orEmpty()))
-                put("os", fireString(requestData["os"]?.toString().orEmpty()))
-                put("status", fireString("PENDING"))
-                put("timestamp", JSONObject().put("timestampValue", timestamp))
-            })
-        }.toString()
-
-        val response = performFirestoreRestRequest(
-            documentPath = "parents/$parentId/pairingRequests/$requestId",
-            idToken = idToken,
-            method = "PATCH",
-            payload = payload
-        )
-        if (response.responseCode !in 200..299) {
-            throw IllegalStateException(response.errorMessage ?: "REST create failed (${response.responseCode})")
-        }
-    }
-
-    private fun fetchPairingApprovalViaRest(
-        parentId: String,
-        requestId: String,
-        idToken: String
-    ): RestPairingApprovalResult {
-        val response = performFirestoreRestRequest(
-            documentPath = "parents/$parentId/pairingRequests/$requestId",
-            idToken = idToken,
-            method = "GET"
-        )
-        if (response.responseCode == 404) {
-            return RestPairingApprovalResult(status = null, childDocumentId = null)
-        }
-        if (response.responseCode !in 200..299) {
-            throw IllegalStateException(response.errorMessage ?: "REST poll failed (${response.responseCode})")
-        }
-        val json = JSONObject(response.body)
-        val fields = json.optJSONObject("fields") ?: JSONObject()
-        val status = fields.optJSONObject("status")?.optString("stringValue")
-        val childDocumentId = fields.optJSONObject("childDocumentId")?.optString("stringValue")
-        return RestPairingApprovalResult(status = status, childDocumentId = childDocumentId)
-    }
-
-    private fun performFirestoreRestRequest(
-        documentPath: String,
-        idToken: String,
-        method: String,
-        payload: String? = null
-    ): RestHttpResponse {
-        val projectId = FirebaseApp.getInstance().options.projectId
-            ?: throw IllegalStateException("Missing Firebase project id")
-        val url = URL("https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/$documentPath")
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 12_000
-            readTimeout = 12_000
-            setRequestProperty("Authorization", "Bearer $idToken")
-            setRequestProperty("Content-Type", "application/json; charset=utf-8")
-        }
-
-        if (!payload.isNullOrBlank()) {
-            connection.doOutput = true
-            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
-                writer.write(payload)
-            }
-        }
-
-        val code = connection.responseCode
-        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-        val body = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
-        val errorMessage = if (code in 200..299) null else parseFirestoreRestError(body)
-        connection.disconnect()
-        return RestHttpResponse(code, body, errorMessage)
-    }
-
-    private fun parseFirestoreRestError(body: String): String {
-        return runCatching {
-            val root = JSONObject(body)
-            val error = root.optJSONObject("error")
-            val status = error?.optString("status").orEmpty()
-            val message = error?.optString("message").orEmpty()
-            listOf(status, message).filter { it.isNotBlank() }.joinToString(": ")
-        }.getOrElse { body.ifBlank { "Unknown REST error" } }
-    }
-
-    private fun fireString(value: String): JSONObject = JSONObject().put("stringValue", value)
-
-    private data class RestHttpResponse(
-        val responseCode: Int,
-        val body: String,
-        val errorMessage: String?
-    )
 }
 

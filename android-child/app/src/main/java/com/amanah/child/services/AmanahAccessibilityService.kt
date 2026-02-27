@@ -111,13 +111,8 @@ class AmanahAccessibilityService : AccessibilityService() {
         if (packageName.contains("com.amanah.child")) return
         rememberForegroundApp(packageName)
 
-        if (isCameraPolicyActive() && isCameraSensitiveApp(packageName)) {
-            handleBlockedApp(packageName, "camera_policy")
-            return
-        }
-
-        if (isMicrophonePolicyActive() && isMicrophoneSensitiveApp(packageName)) {
-            handleBlockedApp(packageName, "microphone_policy")
+        if (isCameraMicPolicyActive() && isCameraOrMicSensitiveApp(packageName)) {
+            handleBlockedApp(packageName, "camera_mic_policy")
             return
         }
 
@@ -423,10 +418,8 @@ class AmanahAccessibilityService : AccessibilityService() {
         }
 
         val content = when {
-            reason == "camera_policy" ->
-                "Camera-capable app launch blocked by child policy."
-            reason == "microphone_policy" ->
-                "Microphone-capable app launch blocked by child policy."
+            reason == "camera_mic_policy" ->
+                "Camera/microphone sensitive app launch blocked by child policy."
             reason.startsWith("partial_isolation:") ->
                 "Partial app isolation blocked risky $scope surface inside the monitored app."
             else ->
@@ -434,10 +427,8 @@ class AmanahAccessibilityService : AccessibilityService() {
         }
 
         val aiAnalysis = when {
-            reason == "camera_policy" ->
-                "Package blocked by blockCamera policy."
-            reason == "microphone_policy" ->
-                "Package blocked by blockMicrophone policy."
+            reason == "camera_mic_policy" ->
+                "Package blocked by blockCameraAndMic policy."
             reason.startsWith("partial_isolation:") ->
                 "Partial isolation policy blocked scope=$scope in this app session."
             else ->
@@ -564,66 +555,26 @@ class AmanahAccessibilityService : AccessibilityService() {
         return keywords.any { keyword -> signal.contains(keyword) }
     }
 
-    private fun isCameraPolicyActive(): Boolean {
-        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
-        return prefs.getBoolean("blockCamera", false) || prefs.getBoolean("blockCameraAndMic", false)
+    private fun isCameraMicPolicyActive(): Boolean {
+        return getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+            .getBoolean("blockCameraAndMic", false)
     }
 
-    private fun isMicrophonePolicyActive(): Boolean {
-        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
-        return prefs.getBoolean("blockMicrophone", false) || prefs.getBoolean("blockCameraAndMic", false)
-    }
-
-    private fun isCameraSensitiveApp(packageName: String): Boolean {
-        val pkg = packageName.lowercase(Locale.getDefault())
+    private fun isCameraOrMicSensitiveApp(packageName: String): Boolean {
+        val pkg = packageName.lowercase()
         val exactOrContains = listOf(
             "com.android.camera",
             "com.google.android.googlecamera",
             "com.sec.android.app.camera",
             "com.oplus.camera",
             "org.codeaurora.snapcam",
-            "com.snapchat.android",
-            "com.instagram.android",
-            "com.whatsapp",
-            "org.telegram.messenger",
-            "com.facebook.orca",
-            "com.google.android.apps.meetings",
-            "us.zoom.videomeetings",
-            "com.google.android.apps.photos",
-            "com.microsoft.teams",
-            "com.discord",
-            "com.zhiliaoapp.musically",
-            "com.ss.android.ugc.trill",
-            "com.bereal.ft",
-            "com.google.android.apps.chromecast.app",
-        )
-        if (exactOrContains.any { token -> pkg == token || pkg.contains(token) }) {
-            return true
-        }
-        return pkg.contains("camera") || pkg.contains("photo") || pkg.contains("scanner") || pkg.contains("video")
-    }
-
-    private fun isMicrophoneSensitiveApp(packageName: String): Boolean {
-        val pkg = packageName.lowercase(Locale.getDefault())
-        val exactOrContains = listOf(
             "com.android.soundrecorder",
-            "com.google.android.apps.recorder",
-            "com.google.android.dialer",
-            "com.android.dialer",
-            "com.whatsapp",
-            "org.telegram.messenger",
-            "com.facebook.orca",
-            "com.instagram.android",
-            "com.snapchat.android",
-            "com.google.android.apps.meetings",
-            "us.zoom.videomeetings",
-            "com.microsoft.teams",
-            "com.discord"
+            "com.google.android.apps.recorder"
         )
         if (exactOrContains.any { token -> pkg == token || pkg.contains(token) }) {
             return true
         }
-        return pkg.contains("recorder") || pkg.contains("voice") || pkg.contains("call") || pkg.contains("dialer") || pkg.contains("audio")
+        return pkg.contains("camera") || pkg.contains("recorder") || pkg.contains("voice")
     }
 
     private fun uploadAlert(content: String, platform: String, analysis: SecurityCortex.AnalysisResult) {

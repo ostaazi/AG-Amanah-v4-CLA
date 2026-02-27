@@ -347,13 +347,16 @@ const App: React.FC = () => {
     if (!allLocksDisabled) {
       const restoreEntries = Array.from(lockBypassPreviousPreventRef.current.entries());
       if (restoreEntries.length > 0) {
-        setChildren((prev) =>
-          prev.map((child) => {
+        setChildren((prev) => {
+          let changed = false;
+          const next = prev.map((child) => {
             const previousPrevent = lockBypassPreviousPreventRef.current.get(child.id);
-            if (previousPrevent === undefined) return child;
+            if (previousPrevent === undefined || child.preventDeviceLock === previousPrevent) return child;
+            changed = true;
             return { ...child, preventDeviceLock: previousPrevent };
-          })
-        );
+          });
+          return changed ? next : prev;
+        });
         void Promise.allSettled(
           restoreEntries.map(([childId, previousPrevent]) =>
             updateMemberInDB(childId, 'CHILD', { preventDeviceLock: previousPrevent })
@@ -365,10 +368,10 @@ const App: React.FC = () => {
       return;
     }
 
-    // Send unlock commands to ALL children (not just pending ones)
-    // This ensures persistent lock screens get cleared on every children update
-    const childrenToUnlock = children.filter((child) => child.deviceLocked);
-    const pendingChildren = children.filter(
+    // Send unlock commands to ALL children using ref snapshot (avoids infinite loop)
+    const currentChildren = childrenRef.current;
+    const childrenToUnlock = currentChildren.filter((child) => child.deviceLocked);
+    const pendingChildren = currentChildren.filter(
       (child) => !lockBypassUnlockedChildrenRef.current.has(child.id)
     );
 
@@ -380,13 +383,18 @@ const App: React.FC = () => {
       }
     });
 
-    // Always update local state for ALL children
-    setChildren((prev) =>
-      prev.map((child) => ({ ...child, deviceLocked: false, preventDeviceLock: true }))
-    );
+    // Update local state only if values actually differ
+    setChildren((prev) => {
+      let changed = false;
+      const next = prev.map((child) => {
+        if (child.deviceLocked === false && child.preventDeviceLock === true) return child;
+        changed = true;
+        return { ...child, deviceLocked: false, preventDeviceLock: true };
+      });
+      return changed ? next : prev;
+    });
 
     // Determine which children need remote commands
-    // Send to: new children (pendingChildren) + any still showing as locked
     const targetChildren = new Map<string, Child>();
     pendingChildren.forEach((c) => targetChildren.set(c.id, c));
     childrenToUnlock.forEach((c) => targetChildren.set(c.id, c));
@@ -408,12 +416,10 @@ const App: React.FC = () => {
         });
       } catch (error) {
         console.warn(`[Amanah] Unlock command failed for ${child.name || child.id} (attempt ${attempt + 1}):`, error);
-        // Retry once after 2 seconds
         if (attempt < 1) {
           await new Promise((r) => setTimeout(r, 2000));
           return sendUnlockCommands(child, attempt + 1);
         }
-        // On final failure, remove from tracking so it gets retried on next effect trigger
         lockBypassUnlockedChildrenRef.current.delete(child.id);
       }
     };
@@ -421,7 +427,8 @@ const App: React.FC = () => {
     void Promise.allSettled(
       Array.from(targetChildren.values()).map((child) => sendUnlockCommands(child))
     );
-  }, [allLocksDisabled, children]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allLocksDisabled]);
 
   const handleAcceptSuggestedMode = (plan: Partial<CustomMode>) => {
     const nextMode: CustomMode = {
@@ -603,9 +610,6 @@ const App: React.FC = () => {
     if (targetMode.autoTakeScreenshot) {
       commandQueue.push(sendRemoteCommand(childId, 'takeScreenshot', true));
     }
-
-    commandQueue.push(sendRemoteCommand(childId, 'blockCamera', !targetMode.cameraEnabled));
-    commandQueue.push(sendRemoteCommand(childId, 'blockMicrophone', !targetMode.micEnabled));
 
     if (targetMode.preferredVideoSource) {
       commandQueue.push(sendRemoteCommand(childId, 'setVideoSource', targetMode.preferredVideoSource));
@@ -822,16 +826,8 @@ const App: React.FC = () => {
     if (hasMicOrCameraUpdate) {
       const nextMicBlocked = updates.micBlocked ?? child?.micBlocked ?? false;
       const nextCameraBlocked = updates.cameraBlocked ?? child?.cameraBlocked ?? false;
-      const commandQueue: Promise<any>[] = [];
-      if (Object.prototype.hasOwnProperty.call(updates, 'micBlocked')) {
-        commandQueue.push(sendRemoteCommand(childId, 'blockMicrophone', nextMicBlocked));
-      }
-      if (Object.prototype.hasOwnProperty.call(updates, 'cameraBlocked')) {
-        commandQueue.push(sendRemoteCommand(childId, 'blockCamera', nextCameraBlocked));
-      }
-      if (commandQueue.length > 0) {
-        await Promise.allSettled(commandQueue);
-      }
+      const shouldBlockHardware = !!(nextMicBlocked || nextCameraBlocked);
+      await sendRemoteCommand(childId, 'blockCameraAndMic', shouldBlockHardware);
     }
 
     if (hasPreventInstallUpdate) {
@@ -873,12 +869,7 @@ const App: React.FC = () => {
       setChildren((prev) =>
         prev.map((child) => (child.id === childId ? { ...child, deviceLocked: false } : child))
       );
-      // Update member state but don't let failure block the unlock commands
-      try {
-        await handleUpdateMember(childId, 'CHILD', { deviceLocked: false });
-      } catch (e) {
-        console.warn('[Amanah] handleUpdateMember for unlock failed, continuing with commands...', e);
-      }
+      await handleUpdateMember(childId, 'CHILD', { deviceLocked: false });
       // Send both unlock commands to ensure lock screen is fully cleared
       try {
         await sendRemoteCommand(childId, 'lockDevice', false);
@@ -930,12 +921,7 @@ const App: React.FC = () => {
     setChildren((prev) =>
       prev.map((child) => (child.id === childId ? { ...child, ...childLockUpdates } : child))
     );
-    // Update member state but don't let failure block the lock commands
-    try {
-      await handleUpdateMember(childId, 'CHILD', childLockUpdates);
-    } catch (e) {
-      console.warn('[Amanah] handleUpdateMember for lock toggle failed, continuing with commands...', e);
-    }
+    await handleUpdateMember(childId, 'CHILD', childLockUpdates);
     await sendRemoteCommand(childId, 'lockDevice', shouldLock);
     await sendRemoteCommand(childId, 'lockscreenBlackout', {
       enabled: shouldLock,

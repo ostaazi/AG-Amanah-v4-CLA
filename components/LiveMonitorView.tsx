@@ -118,11 +118,6 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
   const [videoSource, setVideoSource] = useState<VideoSource>('screen');
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [latestAudioClip, setLatestAudioClip] = useState<{
-    data: string;
-    mimeType?: string;
-    timestamp: Date;
-  } | null>(null);
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [isWalkieChannelEnabled, setIsWalkieChannelEnabled] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -156,43 +151,12 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
     ],
     [t.mic, t.systemAudio]
   );
-  const readiness = child?.controlReadiness;
-  const streamReadinessMessage = useMemo(() => {
-    if (!child) return '';
-    if (readiness && !readiness.accessibilityEnabled) {
-      return lang === 'ar'
-        ? 'خدمة Accessibility متوقفة على جهاز الطفل، لذلك أوامر الحجب لن تُفرض بالكامل.'
-        : 'Accessibility is disabled on the child device, so blocking commands will not be enforced fully.';
-    }
-    if ((videoSource === 'camera_front' || videoSource === 'camera_back') && readiness && !readiness.cameraPermissionGranted) {
-      return lang === 'ar'
-        ? 'صلاحية الكاميرا غير مفعلة على جهاز الطفل.'
-        : 'Camera permission is missing on the child device.';
-    }
-    if (audioSource === 'mic' && readiness && !readiness.microphonePermissionGranted) {
-      return lang === 'ar'
-        ? 'صلاحية الميكروفون غير مفعلة على جهاز الطفل.'
-        : 'Microphone permission is missing on the child device.';
-    }
-    if (videoSource === 'screen' && readiness && !readiness.screenCaptureReady) {
-      return lang === 'ar'
-        ? 'البث من الشاشة يحتاج تفعيل إذن التقاط الشاشة داخل تطبيق الطفل.'
-        : 'Screen streaming needs screen-capture permission inside the child app.';
-    }
-    if (audioSource === 'system') {
-      return lang === 'ar'
-        ? 'صوت النظام غير مدعوم بعد، وسيتم استخدام الميكروفون عند توفره.'
-        : 'System audio is not supported yet; microphone audio will be used when available.';
-    }
-    return '';
-  }, [audioSource, child, lang, readiness, videoSource]);
 
   useEffect(() => {
     if (!child) return;
     setSelectedChildId(child.id);
     setIsLockdown(!!child.deviceLocked);
     setIsBlackoutActive(false);
-    setLatestAudioClip(null);
     setIsWalkieChannelEnabled(false);
     setIsPushToTalk(false);
   }, [child?.id, child?.deviceLocked]);
@@ -206,25 +170,13 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
       const latestImage = childAlerts.find(
         (a) =>
           a.imageData &&
-          ((a.platform === 'Live Stream' && a.streamKind === 'video') ||
           (String(a.content || '').includes('لقطة شاشة') ||
-            String(a.content || '').toLowerCase().includes('screenshot')))
+            String(a.content || '').toLowerCase().includes('screenshot'))
       );
 
       if (latestImage?.imageData) {
         setLiveScreenshot(latestImage.imageData);
         setIsCapturing(false);
-      }
-
-      const latestAudio = childAlerts.find(
-        (a) => a.platform === 'Live Stream' && a.streamKind === 'audio' && a.audioData
-      );
-      if (latestAudio?.audioData) {
-        setLatestAudioClip({
-          data: latestAudio.audioData,
-          mimeType: latestAudio.audioMimeType,
-          timestamp: new Date(latestAudio.timestamp || Date.now()),
-        });
       }
 
       const latestEntries = childAlerts
@@ -304,7 +256,6 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
 
   const startStream = async () => {
     if (!child) return;
-    if (streamReadinessMessage && audioSource !== 'system') return;
     await sendRemoteCommand(child.id, 'startLiveStream', {
       videoSource,
       audioSource,
@@ -481,7 +432,6 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
             onClick={() => {
               setSelectedChildId(c.id);
               setLiveScreenshot(null);
-              setLatestAudioClip(null);
               setTranscript([]);
               setRiskInsight(null);
               setVoiceTone('calm');
@@ -531,7 +481,6 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
             </button>
             <button
               onClick={isStreaming ? stopStream : startStream}
-              disabled={!isStreaming && !!streamReadinessMessage && audioSource !== 'system'}
               className={`px-6 py-3 rounded-2xl font-black text-sm ${isStreaming ? 'bg-red-50 text-red-700' : 'bg-emerald-600 text-white'}`}
             >
               {isStreaming ? t.endStream : t.startStream}
@@ -574,12 +523,6 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
               : lockDisableMode === 'permanent'
                 ? 'All locks are disabled permanently from settings.'
                 : `All locks are disabled temporarily${lockDisableUntilTs ? ` until ${formatDateTimeDefault(lockDisableUntilTs, { includeSeconds: false })}` : ''}.`}
-          </div>
-        )}
-
-        {streamReadinessMessage && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-black text-amber-800">
-            {streamReadinessMessage}
           </div>
         )}
 
@@ -731,22 +674,6 @@ const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
               </div>
             </div>
             <p className="text-[11px] font-bold text-slate-300">{t.detectingAudio}</p>
-            {latestAudioClip && (
-              <div className="rounded-xl bg-white/10 p-3 space-y-2">
-                <p className="text-[10px] font-black text-slate-200">
-                  {lang === 'ar'
-                    ? `آخر مقطع صوتي وصل ${formatTimeDefault(latestAudioClip.timestamp, { includeSeconds: true })}`
-                    : `Latest microphone clip at ${formatTimeDefault(latestAudioClip.timestamp, { includeSeconds: true })}`}
-                </p>
-                <audio
-                  key={`${latestAudioClip.timestamp.getTime()}-${latestAudioClip.mimeType || 'audio'}`}
-                  controls
-                  autoPlay
-                  className="w-full"
-                  src={latestAudioClip.data}
-                />
-              </div>
-            )}
           </div>
 
           <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-4">

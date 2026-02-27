@@ -31,7 +31,7 @@ import {
 import { generate2FASecret, getQRCodeUrl, verifyTOTP } from '../services/twoFAService';
 import { logoutUser } from '../services/authService';
 import { ValidationService } from '../services/validationService';
-import { formatDateTimeDefault, formatTimeDefault, toDateOrNull } from '../services/dateTimeFormat';
+import { formatDateTimeDefault, formatTimeDefault } from '../services/dateTimeFormat';
 import AvatarPickerModal from './AvatarPickerModal';
 import { QRCodeSVG } from 'qrcode.react';
 import { useStepUpGuard } from './auth/StepUpGuard';
@@ -95,23 +95,6 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
   return fallback;
 };
 
-const resolvePairingKeyExpiryMs = (value: unknown): number => {
-  const parsed = toDateOrNull(value as any);
-  return parsed ? parsed.getTime() : 0;
-};
-
-const formatPairingCountdown = (remainingMs: number, lang: 'ar' | 'en'): string => {
-  if (remainingMs <= 0) {
-    return lang === 'ar' ? 'انتهت الصلاحية' : 'Expired';
-  }
-
-  const totalSeconds = Math.ceil(remainingMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  const clockLabel = `${minutes}:${String(seconds).padStart(2, '0')}`;
-  return lang === 'ar' ? `المتبقي ${clockLabel}` : `${clockLabel} remaining`;
-};
-
 const SettingsView: React.FC<SettingsViewProps> = ({
   currentUser,
   children,
@@ -127,12 +110,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   const [pendingDelete, setPendingDelete] = useState<PendingDeleteState>(null);
   const [supervisors, setSupervisors] = useState<FamilyMember[]>([]);
   const [pairingKeyUi, setPairingKeyUi] = useState<string>(currentUser.pairingKey || '');
-  const [pairingKeyExpiresAtMs, setPairingKeyExpiresAtMs] = useState<number>(() =>
-    resolvePairingKeyExpiryMs(currentUser.pairingKeyExpiresAt)
-  );
-  const [pairingTimeRemainingMs, setPairingTimeRemainingMs] = useState<number>(() =>
-    Math.max(0, resolvePairingKeyExpiryMs(currentUser.pairingKeyExpiresAt) - Date.now())
-  );
+  const [pairingNowMs, setPairingNowMs] = useState(Date.now());
+
+  // Sync pairingKeyUi when props change (e.g. from Firestore subscription)
+  useEffect(() => {
+    if (currentUser.pairingKey && currentUser.pairingKey !== pairingKeyUi) {
+      setPairingKeyUi(currentUser.pairingKey);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser.pairingKey]);
 
   // States for 2FA and Password
   const [showPassForm, setShowPassForm] = useState(false);
@@ -228,25 +214,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   }, [currentUser.pairingKey]);
 
   useEffect(() => {
-    setPairingKeyExpiresAtMs(resolvePairingKeyExpiryMs(currentUser.pairingKeyExpiresAt));
-  }, [currentUser.pairingKeyExpiresAt, currentUser.pairingKey]);
-
-  useEffect(() => {
-    if (!pairingKeyExpiresAtMs) {
-      setPairingTimeRemainingMs(0);
-      return;
-    }
-
-    const syncCountdown = () => {
-      setPairingTimeRemainingMs(Math.max(0, pairingKeyExpiresAtMs - Date.now()));
-    };
-
-    syncCountdown();
-    const timerId = window.setInterval(syncCountdown, 1000);
-    return () => window.clearInterval(timerId);
-  }, [pairingKeyExpiresAtMs]);
-
-  useEffect(() => {
     setParentProfileForm({
       name: currentUser.name || '',
       email: currentUser.email || '',
@@ -279,15 +246,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({
       window.removeEventListener(mockConfigChangedEventName, handleMockConfigChange as EventListener);
     };
   }, [mockConfigChangedEventName]);
-
-  const pairingCountdownLabel = formatPairingCountdown(pairingTimeRemainingMs, lang);
-  const pairingExpiryTimeLabel = pairingKeyExpiresAtMs
-    ? formatTimeDefault(pairingKeyExpiresAtMs, { includeSeconds: false, fallback: '--' })
-    : '--';
-  const pairingCountdownToneClass =
-    pairingTimeRemainingMs <= 60_000
-      ? 'text-rose-300 border-rose-400/30 bg-rose-500/10'
-      : 'text-emerald-200 border-emerald-400/20 bg-emerald-500/10';
 
   useEffect(() => {
     if (!showParentProfileEditor) {
@@ -338,62 +296,68 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     };
   }, [showParentProfileEditor, phoneRecaptchaContainerId]);
 
+  // Pairing key countdown timer
+  useEffect(() => {
+    const timer = window.setInterval(() => setPairingNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const pairingExpiryDate = useMemo(() => {
+    if (!currentUser.pairingKeyExpiresAt) return null;
+    if (typeof currentUser.pairingKeyExpiresAt.toDate === 'function') {
+      return currentUser.pairingKeyExpiresAt.toDate() as Date;
+    }
+    const d = new Date(currentUser.pairingKeyExpiresAt);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }, [currentUser.pairingKeyExpiresAt]);
+
+  const pairingRemainingSec = pairingExpiryDate
+    ? Math.max(0, Math.floor((pairingExpiryDate.getTime() - pairingNowMs) / 1000))
+    : 0;
+  const pairingIsExpired = pairingRemainingSec <= 0;
+  const pairingMm = String(Math.floor(pairingRemainingSec / 60)).padStart(2, '0');
+  const pairingSs = String(pairingRemainingSec % 60).padStart(2, '0');
+
   // Phase 4.1: Dynamic Pairing Auto-Rotation
   useEffect(() => {
     const checkRotation = async () => {
-      // Safety check for guest mode
       if (currentUser.id === 'guest') return;
 
       const now = new Date();
-      const expiresMs = resolvePairingKeyExpiryMs(currentUser.pairingKeyExpiresAt);
-      const expires = expiresMs ? new Date(expiresMs) : null;
+      const needsRotation =
+        !currentUser.pairingKey ||
+        !pairingExpiryDate ||
+        now > pairingExpiryDate;
 
-      // If no key or expired, rotate
-      if (!currentUser.pairingKey || !expires || now > expires) {
+      if (needsRotation) {
         try {
           const newKey = await rotatePairingKey(currentUser.id);
-          const nextExpiresAtMs = now.getTime() + 10 * 60 * 1000;
-          // Update local state is handled by Firestore subscription in App.tsx usually, 
-          // but here we might rely on the parent updating props. 
-          // Since rotatePairingKey updates DB, and App.tsx syncs profile, it should reflect.
-          // However, syncParentProfile in App.tsx might not be real-time for *own* profile changes unless we manually trigger it.
-          // For now, we assume App.tsx will pick it up or we manually update if needed.
-          // Actually, App.tsx has handleUpdateMember but that's for explicit UI actions.
-          // To ensure UI updates, we might need to call onUpdateMember with the new key if we had the key returned.
-          // But rotatePairingKey does the DB write.
-          // Let's manually trigger a local update to ensure responsiveness if needed, 
-          // but strictly we should rely on data flow. 
-          // For this specific flow, let's trust the prop update cycle or force it via onUpdateMember (hacky).
-          // Better: just call rotatePairingKey and assume the parent component refetches or we force a reload.
-          // Actually, standard pattern:
           await onUpdateMember(currentUser.id, 'ADMIN', {
             pairingKey: newKey,
-            pairingKeyExpiresAt: new Date(nextExpiresAtMs),
+            pairingKeyExpiresAt: new Date(now.getTime() + 10 * 60 * 1000),
           });
           setPairingKeyUi(newKey);
-          setPairingKeyExpiresAtMs(nextExpiresAtMs);
-        } catch (e) {
-          console.error('Failed to rotate pairing key', e);
+        } catch {
+          // Rate-limit or network error — will retry next interval
         }
       }
     };
 
     checkRotation();
-    const interval = setInterval(checkRotation, 60 * 1000); // Check every minute
+    const interval = setInterval(checkRotation, 60 * 1000);
     return () => clearInterval(interval);
-  }, [currentUser.id, currentUser.pairingKey, currentUser.pairingKeyExpiresAt, onUpdateMember]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser.id, currentUser.pairingKey, pairingExpiryDate]);
 
   const handleRegenerateKey = async () => {
     setIsProcessing(true);
     try {
       const newKey = await rotatePairingKey(currentUser.id);
-      const nextExpiresAtMs = Date.now() + 10 * 60 * 1000;
       await onUpdateMember(currentUser.id, 'ADMIN', {
         pairingKey: newKey,
-        pairingKeyExpiresAt: new Date(nextExpiresAtMs),
+        pairingKeyExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
       });
       setPairingKeyUi(newKey);
-      setPairingKeyExpiresAtMs(nextExpiresAtMs);
       showSuccessToast('تم تحديث مفتاح الربط');
     } catch (e) {
       console.error(e);
@@ -1868,16 +1832,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                     <ICONS.Rocket className="w-5 h-5" />
                   </button>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span
-                    className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black ${pairingCountdownToneClass}`}
-                  >
-                    {pairingCountdownLabel}
-                  </span>
-                  <span className="inline-flex items-center rounded-full border border-indigo-200 bg-white px-3 py-1 text-[11px] font-black text-slate-600">
-                    {lang === 'ar' ? `ينتهي عند ${pairingExpiryTimeLabel}` : `Expires at ${pairingExpiryTimeLabel}`}
-                  </span>
-                </div>
               </div>
 
               <div className="space-y-2">
@@ -2471,19 +2425,14 @@ const SettingsView: React.FC<SettingsViewProps> = ({
               <ICONS.Rocket className="w-6 h-6" />
             </button>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <span
-              className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-black ${pairingCountdownToneClass}`}
-            >
-              {pairingCountdownLabel}
+          <div className="flex items-center gap-3">
+            <span className={`font-mono text-lg font-black ${pairingIsExpired ? 'text-red-400' : 'text-emerald-400'}`}>
+              {pairingIsExpired ? (lang === 'ar' ? 'منتهي' : 'Expired') : `${pairingMm}:${pairingSs}`}
             </span>
-            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-black text-slate-300">
-              {lang === 'ar' ? `ينتهي عند ${pairingExpiryTimeLabel}` : `Expires at ${pairingExpiryTimeLabel}`}
+            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+              {lang === 'ar' ? 'يتم التحديث تلقائياً كل 10 دقائق' : 'Auto-refreshes every 10 minutes'}
             </span>
           </div>
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest animate-pulse">
-            يتم تحديث الكود تلقائياً كل 10 دقائق
-          </p>
         </div>
       </section>
 

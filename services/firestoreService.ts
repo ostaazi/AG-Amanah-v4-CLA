@@ -1315,9 +1315,6 @@ export const subscribeToChildren = (parentId: string, callback: (children: Child
       )
       .filter(Boolean) as Child[];
     callback(children);
-  }, (err) => {
-    console.error('Children subscription error:', err);
-    callback([]);
   });
 };
 
@@ -1339,8 +1336,6 @@ export const addChildToDB = async (parentId: string, childData: Partial<Child>):
       },
       playSiren: { value: false, timestamp: Timestamp.now() },
       cutInternet: { value: false, timestamp: Timestamp.now() },
-      blockCamera: { value: false, timestamp: Timestamp.now() },
-      blockMicrophone: { value: false, timestamp: Timestamp.now() },
       blockCameraAndMic: { value: false, timestamp: Timestamp.now() },
       dnsFiltering: {
         value: { enabled: false, mode: 'family', domains: [] },
@@ -2019,15 +2014,9 @@ export const subscribeToParentMessages = (
     callback([]);
     return () => { };
   }
-  // Firestore rules require senderId == auth.uid for reads.
-  // Include senderId filter so the query satisfies the security rule.
-  const uid = auth?.currentUser?.uid;
-  const filters = uid
-    ? [where('senderId', '==', uid), where('childId', '==', childId)]
-    : [where('childId', '==', childId)];
   const q = query(
     collection(db, PARENT_MESSAGES_COLLECTION),
-    ...filters,
+    where('childId', '==', childId),
     orderBy('timestamp', 'desc'),
     limit(5),
   );
