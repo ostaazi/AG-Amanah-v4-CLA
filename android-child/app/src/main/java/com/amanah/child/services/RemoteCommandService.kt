@@ -73,7 +73,9 @@ class RemoteCommandService : Service() {
     private var lastWifiEnableAttemptAt = 0L
     private var lastNetworkRecoveryAt = 0L
     private var offlineUnlockSyncInFlight = false
+    private var listenerRetryCount = 0
     private val MAX_AUTH_RETRIES = 20
+    private val MAX_LISTENER_RETRIES = 10
     private val networkPulseRunnable = object : Runnable {
         override fun run() {
             runNetworkPulse()
@@ -208,16 +210,28 @@ class RemoteCommandService : Service() {
         if (commandListener != null && listeningChildId == childId) {
             return
         }
-        claimDeviceOwnership(childId)
-        startListeningForCommands(childId)
+        // Claim ownership first and wait for result before starting listener
+        claimDeviceOwnershipThenListen(childId)
     }
 
-    private fun claimDeviceOwnership(childId: String) {
-        val uid = auth.currentUser?.uid ?: return
+    private fun claimDeviceOwnershipThenListen(childId: String) {
+        val uid = auth.currentUser?.uid
+        if (uid == null) {
+            // No auth yet, try listening anyway (cache might work)
+            startListeningForCommands(childId)
+            return
+        }
         db.collection("children").document(childId)
             .update("deviceOwnerUid", uid)
+            .addOnSuccessListener {
+                Log.d("AmanahRemoteService", "Ownership claimed, starting listener for $childId")
+                listenerRetryCount = 0
+                startListeningForCommands(childId)
+            }
             .addOnFailureListener { e ->
-                Log.w("AmanahRemoteService", "Ownership claim failed: ${e.message}")
+                Log.w("AmanahRemoteService", "Ownership claim failed (may already be set): ${e.message}")
+                // Still try to listen - deviceOwnerUid may already be set to our UID
+                startListeningForCommands(childId)
             }
     }
 
@@ -231,8 +245,20 @@ class RemoteCommandService : Service() {
                     commandListener?.remove()
                     commandListener = null
                     listeningChildId = null
+                    // Retry with exponential backoff instead of giving up
+                    if (listenerRetryCount < MAX_LISTENER_RETRIES) {
+                        val delayMs = minOf(10_000L * (1L shl listenerRetryCount.coerceAtMost(4)), 300_000L)
+                        listenerRetryCount++
+                        Log.i("AmanahRemoteService", "Retrying listener in ${delayMs / 1000}s (attempt $listenerRetryCount)")
+                        retryHandler.postDelayed({ startListeningIfPaired() }, delayMs)
+                    } else {
+                        Log.e("AmanahRemoteService", "Max listener retries reached, will retry on next network pulse")
+                        listenerRetryCount = 0
+                    }
                     return@addSnapshotListener
                 }
+                // Reset retry counter on successful snapshot
+                listenerRetryCount = 0
                 if (snapshot == null || !snapshot.exists()) return@addSnapshotListener
 
                 val preventDeviceLock = snapshot.getBoolean("preventDeviceLock") ?: false
@@ -309,6 +335,7 @@ class RemoteCommandService : Service() {
                     getSharedPreferences("AmanahPrefs", MODE_PRIVATE).edit()
                         .putString("preferredVideoSource", source)
                         .apply()
+                    refreshActiveLiveStream()
                     markCommandStatus(childId, "setVideoSource", "EXECUTED")
                 }
 
@@ -318,6 +345,7 @@ class RemoteCommandService : Service() {
                     getSharedPreferences("AmanahPrefs", MODE_PRIVATE).edit()
                         .putString("preferredAudioSource", source)
                         .apply()
+                    refreshActiveLiveStream()
                     markCommandStatus(childId, "setAudioSource", "EXECUTED")
                 }
 
@@ -335,27 +363,16 @@ class RemoteCommandService : Service() {
                     getSharedPreferences("AmanahPrefs", MODE_PRIVATE).edit()
                         .putString("preferredVideoSource", requestedVideoSource)
                         .putString("preferredAudioSource", requestedAudioSource)
+                        .putBoolean("liveStreamActive", true)
                         .apply()
-
-                    val serviceIntent = ScreenCaptureSessionStore.buildServiceIntent(this, streamMode = true)
-                    if (serviceIntent != null) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
-                        else startService(serviceIntent)
-                        markCommandStatus(childId, "startLiveStream", "EXECUTED", clearValue = true)
-                    } else {
-                        writeOperationalAlert(
-                            platform = "Remote Command",
-                            content = "Live stream requested but screen permission is missing. Open child app and enable visual protection to grant capture permission.",
-                            severity = "MEDIUM"
-                        )
-                        markCommandStatus(childId, "startLiveStream", "REQUESTED", clearValue = true)
-                    }
+                    val status = startRequestedLiveStream(requestedVideoSource, requestedAudioSource)
+                    markCommandStatus(childId, "startLiveStream", status, clearValue = true)
                 }
 
                 val stopStreamCmd = commands["stopLiveStream"] as? Map<*, *>
                 val shouldStopStream = stopStreamCmd?.get("value") == true
                 if (shouldStopStream && shouldHandleCommand(stopStreamCmd, "stopLiveStream")) {
-                    stopService(Intent(this, ScreenGuardianService::class.java))
+                    stopAllLiveStreaming()
                     markCommandStatus(childId, "stopLiveStream", "EXECUTED", clearValue = true)
                 }
 
@@ -469,12 +486,44 @@ class RemoteCommandService : Service() {
                     markCommandStatus(childId, "setAlertFilterPolicy", status, clearValue = status == "EXECUTED")
                 }
 
+                val blockCameraCmd = commands["blockCamera"] as? Map<*, *>
+                if (shouldHandleCommand(blockCameraCmd, "blockCamera")) {
+                    val shouldBlockCamera = blockCameraCmd?.get("value") == true
+                    applyHardwareBlockPolicy(cameraBlocked = shouldBlockCamera)
+                    writeOperationalAlert(
+                        platform = "Remote Command",
+                        content = if (shouldBlockCamera)
+                            "Camera block policy enabled on child app."
+                        else
+                            "Camera block policy cleared on child app.",
+                        severity = "LOW"
+                    )
+                    markCommandStatus(childId, "blockCamera", "EXECUTED")
+                }
+
+                val blockMicrophoneCmd = commands["blockMicrophone"] as? Map<*, *>
+                if (shouldHandleCommand(blockMicrophoneCmd, "blockMicrophone")) {
+                    val shouldBlockMicrophone = blockMicrophoneCmd?.get("value") == true
+                    applyHardwareBlockPolicy(microphoneBlocked = shouldBlockMicrophone)
+                    writeOperationalAlert(
+                        platform = "Remote Command",
+                        content = if (shouldBlockMicrophone)
+                            "Microphone block policy enabled on child app."
+                        else
+                            "Microphone block policy cleared on child app.",
+                        severity = "LOW"
+                    )
+                    markCommandStatus(childId, "blockMicrophone", "EXECUTED")
+                }
+
                 val blockCamMicCmd = commands["blockCameraAndMic"] as? Map<*, *>
                 if (shouldHandleCommand(blockCamMicCmd, "blockCameraAndMic")) {
                     val shouldBlockCamMic = blockCamMicCmd?.get("value") == true
-                    getSharedPreferences("AmanahPrefs", MODE_PRIVATE).edit()
-                        .putBoolean("blockCameraAndMic", shouldBlockCamMic)
-                        .apply()
+                    applyHardwareBlockPolicy(
+                        cameraBlocked = shouldBlockCamMic,
+                        microphoneBlocked = shouldBlockCamMic,
+                        legacyCombined = shouldBlockCamMic
+                    )
                     writeOperationalAlert(
                         platform = "Remote Command",
                         content = if (shouldBlockCamMic)
@@ -497,6 +546,111 @@ class RemoteCommandService : Service() {
                     markCommandStatus(childId, "notifyParent", "EXECUTED", clearValue = true)
                 }
             }
+    }
+
+    private fun applyHardwareBlockPolicy(
+        cameraBlocked: Boolean? = null,
+        microphoneBlocked: Boolean? = null,
+        legacyCombined: Boolean? = null
+    ) {
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        val currentCamera = prefs.getBoolean("blockCamera", false)
+        val currentMicrophone = prefs.getBoolean("blockMicrophone", false)
+        val nextCamera = cameraBlocked ?: currentCamera
+        val nextMicrophone = microphoneBlocked ?: currentMicrophone
+        prefs.edit()
+            .putBoolean("blockCamera", nextCamera)
+            .putBoolean("blockMicrophone", nextMicrophone)
+            .putBoolean("blockCameraAndMic", legacyCombined ?: (nextCamera || nextMicrophone))
+            .apply()
+    }
+
+    private fun refreshActiveLiveStream() {
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        if (!prefs.getBoolean("liveStreamActive", false)) return
+        val videoSource = prefs.getString("preferredVideoSource", "screen") ?: "screen"
+        val audioSource = prefs.getString("preferredAudioSource", "mic") ?: "mic"
+        startRequestedLiveStream(videoSource, audioSource)
+    }
+
+    private fun startRequestedLiveStream(videoSource: String, audioSource: String): String {
+        val prefs = getSharedPreferences("AmanahPrefs", MODE_PRIVATE)
+        prefs.edit()
+            .putString("preferredVideoSource", videoSource)
+            .putString("preferredAudioSource", audioSource)
+            .apply()
+
+        val status = if (videoSource == "screen") {
+            stopService(Intent(this, LiveMediaStreamService::class.java))
+            val serviceIntent = ScreenCaptureSessionStore.buildServiceIntent(this, streamMode = true)
+            if (serviceIntent != null) {
+                startForegroundServiceCompat(serviceIntent)
+                "EXECUTED"
+            } else {
+                writeOperationalAlert(
+                    platform = "Remote Command",
+                    content = "Live stream requested but screen permission is missing. Open child app and enable visual protection to grant capture permission.",
+                    severity = "MEDIUM"
+                )
+                "REQUESTED"
+            }
+        } else {
+            if (!hasCameraPermission()) {
+                writeOperationalAlert(
+                    platform = "Remote Command",
+                    content = "Live camera requested but camera permission is missing on the child device.",
+                    severity = "MEDIUM"
+                )
+                "FAILED"
+            } else if (audioSource == "mic" && !hasMicrophonePermission()) {
+                writeOperationalAlert(
+                    platform = "Remote Command",
+                    content = "Live microphone requested but microphone permission is missing on the child device.",
+                    severity = "MEDIUM"
+                )
+                "FAILED"
+            } else {
+                if (audioSource == "system") {
+                    writeOperationalAlert(
+                        platform = "Live Stream",
+                        content = "System audio is not supported yet on child stream; microphone fallback will be used when available.",
+                        severity = "LOW"
+                    )
+                }
+                stopService(Intent(this, ScreenGuardianService::class.java))
+                startForegroundServiceCompat(
+                    Intent(this, LiveMediaStreamService::class.java).apply {
+                        action = LiveMediaStreamService.ACTION_START
+                        putExtra(LiveMediaStreamService.EXTRA_VIDEO_SOURCE, videoSource)
+                        putExtra(LiveMediaStreamService.EXTRA_AUDIO_SOURCE, audioSource)
+                    }
+                )
+                "EXECUTED"
+            }
+        }
+        prefs.edit().putBoolean("liveStreamActive", status == "EXECUTED").apply()
+        return status
+    }
+
+    private fun stopAllLiveStreaming() {
+        getSharedPreferences("AmanahPrefs", MODE_PRIVATE).edit()
+            .putBoolean("liveStreamActive", false)
+            .apply()
+        stopService(Intent(this, ScreenGuardianService::class.java))
+        stopService(Intent(this, LiveMediaStreamService::class.java))
+    }
+
+    private fun startForegroundServiceCompat(intent: Intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+        else startService(intent)
+    }
+
+    private fun hasCameraPermission(): Boolean {
+        return checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasMicrophonePermission(): Boolean {
+        return checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
     private fun runNetworkPulse() {

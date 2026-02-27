@@ -33,6 +33,12 @@ const UI_TEXT = {
     refreshLocation: 'Refresh location',
     waitingGpsPrefix: 'Waiting for GPS signal for',
     hardwareControls: 'Hardware Controls',
+    readinessTitle: 'Child readiness',
+    waitingReadiness: 'Waiting for the child device to report its control readiness.',
+    controlReady: 'App control is ready on the child device.',
+    needsAccessibility: 'Enable Amanah Accessibility on the child device for app, camera, and microphone enforcement.',
+    needsCameraPermission: 'Grant child camera permission so live camera streaming can start.',
+    needsMicPermission: 'Grant child microphone permission so live microphone streaming can start.',
     blockMic: 'Block microphone',
     blockCamera: 'Block camera',
     preventInstall: 'Prevent app install',
@@ -71,6 +77,12 @@ const UI_TEXT = {
     refreshLocation: 'Refresh location',
     waitingGpsPrefix: 'Waiting for GPS signal for',
     hardwareControls: 'Hardware Controls',
+    readinessTitle: 'جاهزية جهاز الطفل',
+    waitingReadiness: 'بانتظار أن يرسل جهاز الطفل حالة الجاهزية الحالية.',
+    controlReady: 'الجهاز جاهز الآن لتطبيق أوامر التحكم.',
+    needsAccessibility: 'فعّل خدمة Amanah Accessibility على جهاز الطفل حتى يعمل حجب التطبيقات والكاميرا والمايك.',
+    needsCameraPermission: 'امنح صلاحية الكاميرا على جهاز الطفل حتى يبدأ البث بالكاميرا.',
+    needsMicPermission: 'امنح صلاحية الميكروفون على جهاز الطفل حتى يبدأ بث الميكروفون.',
     blockMic: 'Block microphone',
     blockCamera: 'Block camera',
     preventInstall: 'Prevent app install',
@@ -163,6 +175,17 @@ const DevicesView: React.FC<DevicesViewProps> = ({
   const signalStrength = Number.isFinite(child?.signalStrength as number)
     ? (child?.signalStrength as number)
     : 0;
+  const readiness = child.controlReadiness;
+  const readinessIssues = [
+    readiness && !readiness.accessibilityEnabled ? ui.needsAccessibility : null,
+    readiness && !readiness.cameraPermissionGranted ? ui.needsCameraPermission : null,
+    readiness && !readiness.microphonePermissionGranted ? ui.needsMicPermission : null,
+  ].filter(Boolean) as string[];
+  const readinessMessage = !readiness
+    ? ui.waitingReadiness
+    : readinessIssues.length === 0
+      ? ui.controlReady
+      : readinessIssues[0];
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [locationIntel, setLocationIntel] = useState<LocationSafetyIntel | null>(null);
 
@@ -373,6 +396,10 @@ const DevicesView: React.FC<DevicesViewProps> = ({
               {ui.hardwareControls}
               <span className="text-[10px] text-red-500 font-black animate-pulse">LIVE</span>
             </h3>
+            <div className={`rounded-2xl border px-4 py-3 ${!readiness ? 'border-slate-200 bg-slate-50 text-slate-700' : readinessIssues.length === 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+              <p className="text-[11px] font-black uppercase tracking-wide">{ui.readinessTitle}</p>
+              <p className="mt-1 text-[11px] font-bold">{readinessMessage}</p>
+            </div>
             <div className="space-y-4">
               <HardwareToggle
                 label={ui.blockMic}

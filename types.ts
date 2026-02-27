@@ -136,6 +136,19 @@ export interface ProactiveDefenseConfig {
   voiceRecordUrl?: string;
 }
 
+export interface ControlReadiness {
+  accessibilityEnabled: boolean;
+  deviceAdminEnabled: boolean;
+  remoteServiceRunning: boolean;
+  cameraPermissionGranted: boolean;
+  microphonePermissionGranted: boolean;
+  screenCaptureReady: boolean;
+  appControlReady: boolean;
+  liveCameraReady: boolean;
+  liveMicrophoneReady: boolean;
+  updatedAt?: Date | any;
+}
+
 export interface Child extends FamilyMember {
   parentId: string;
   deviceOwnerUid?: string;
@@ -157,6 +170,7 @@ export interface Child extends FamilyMember {
   riskScore?: { childScore: number; trend: 'up' | 'down' | 'stable' };
   riskProfile?: { isCompliant: boolean };
   defenseConfig?: ProactiveDefenseConfig;
+  controlReadiness?: ControlReadiness;
 }
 
 export type AlertProtocolMode = 'FULL' | 'SIMPLE' | 'NONE';
@@ -216,6 +230,10 @@ export interface MonitoringAlert {
   platform: string;
   content: string;
   imageData?: string;
+  audioData?: string;
+  audioMimeType?: string;
+  streamKind?: 'video' | 'audio';
+  streamSource?: string;
   captureStatus?: string;
   evidencePayloadVersion?: string;
   evidenceUploadStatus?: string;

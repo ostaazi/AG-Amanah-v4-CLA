@@ -604,6 +604,9 @@ const App: React.FC = () => {
       commandQueue.push(sendRemoteCommand(childId, 'takeScreenshot', true));
     }
 
+    commandQueue.push(sendRemoteCommand(childId, 'blockCamera', !targetMode.cameraEnabled));
+    commandQueue.push(sendRemoteCommand(childId, 'blockMicrophone', !targetMode.micEnabled));
+
     if (targetMode.preferredVideoSource) {
       commandQueue.push(sendRemoteCommand(childId, 'setVideoSource', targetMode.preferredVideoSource));
     }
@@ -819,8 +822,16 @@ const App: React.FC = () => {
     if (hasMicOrCameraUpdate) {
       const nextMicBlocked = updates.micBlocked ?? child?.micBlocked ?? false;
       const nextCameraBlocked = updates.cameraBlocked ?? child?.cameraBlocked ?? false;
-      const shouldBlockHardware = !!(nextMicBlocked || nextCameraBlocked);
-      await sendRemoteCommand(childId, 'blockCameraAndMic', shouldBlockHardware);
+      const commandQueue: Promise<any>[] = [];
+      if (Object.prototype.hasOwnProperty.call(updates, 'micBlocked')) {
+        commandQueue.push(sendRemoteCommand(childId, 'blockMicrophone', nextMicBlocked));
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, 'cameraBlocked')) {
+        commandQueue.push(sendRemoteCommand(childId, 'blockCamera', nextCameraBlocked));
+      }
+      if (commandQueue.length > 0) {
+        await Promise.allSettled(commandQueue);
+      }
     }
 
     if (hasPreventInstallUpdate) {
@@ -862,7 +873,12 @@ const App: React.FC = () => {
       setChildren((prev) =>
         prev.map((child) => (child.id === childId ? { ...child, deviceLocked: false } : child))
       );
-      await handleUpdateMember(childId, 'CHILD', { deviceLocked: false });
+      // Update member state but don't let failure block the unlock commands
+      try {
+        await handleUpdateMember(childId, 'CHILD', { deviceLocked: false });
+      } catch (e) {
+        console.warn('[Amanah] handleUpdateMember for unlock failed, continuing with commands...', e);
+      }
       // Send both unlock commands to ensure lock screen is fully cleared
       try {
         await sendRemoteCommand(childId, 'lockDevice', false);
@@ -914,7 +930,12 @@ const App: React.FC = () => {
     setChildren((prev) =>
       prev.map((child) => (child.id === childId ? { ...child, ...childLockUpdates } : child))
     );
-    await handleUpdateMember(childId, 'CHILD', childLockUpdates);
+    // Update member state but don't let failure block the lock commands
+    try {
+      await handleUpdateMember(childId, 'CHILD', childLockUpdates);
+    } catch (e) {
+      console.warn('[Amanah] handleUpdateMember for lock toggle failed, continuing with commands...', e);
+    }
     await sendRemoteCommand(childId, 'lockDevice', shouldLock);
     await sendRemoteCommand(childId, 'lockscreenBlackout', {
       enabled: shouldLock,
