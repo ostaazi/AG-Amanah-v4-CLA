@@ -43,6 +43,11 @@ phase_backups/
 *.zip
 *.7z
 *.bak
+backup-before-auth-fix-*/
+tmp_backup_*/
+tmp_*/
+tmp-*/
+stitch_screens/
 
 # Windows reserved-name artifact
 nul

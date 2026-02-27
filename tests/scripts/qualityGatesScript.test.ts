@@ -61,14 +61,17 @@ describe('quality-gates CLI', () => {
     writeJson(reportPath, samplePassingReport);
     writeJson(gatesPath, baseGates);
 
+    const artifactsDir = path.join(tempDir, 'artifacts');
+
     const output = execFileSync('node', [scriptPath, reportPath, gatesPath], {
       cwd: tempDir,
       encoding: 'utf8',
+      env: { ...process.env, AMANAH_ARTIFACTS_DIR: artifactsDir },
     });
 
     expect(output).toContain('RESULT: PASS');
 
-    const summaryPath = path.join(tempDir, 'benchmarks', 'reports', 'latest-gate-summary.json');
+    const summaryPath = path.join(artifactsDir, 'benchmarks', 'reports', 'latest-gate-summary.json');
     expect(fs.existsSync(summaryPath)).toBe(true);
     const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
     expect(summary.passed).toBe(true);
@@ -82,6 +85,7 @@ describe('quality-gates CLI', () => {
 
     const reportPath = path.join(tempDir, 'report.json');
     const gatesPath = path.join(tempDir, 'gates.json');
+    const artifactsDir = path.join(tempDir, 'artifacts');
     const report = {
       ...samplePassingReport,
       runs: [
@@ -106,13 +110,13 @@ describe('quality-gates CLI', () => {
       execFileSync('node', [scriptPath, reportPath, gatesPath], {
         cwd: tempDir,
         encoding: 'utf8',
+        env: { ...process.env, AMANAH_ARTIFACTS_DIR: artifactsDir },
       })
     ).toThrow(/RESULT: FAIL/);
 
-    const summaryPath = path.join(tempDir, 'benchmarks', 'reports', 'latest-gate-summary.json');
+    const summaryPath = path.join(artifactsDir, 'benchmarks', 'reports', 'latest-gate-summary.json');
     const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
     expect(summary.passed).toBe(false);
     expect(summary.failures.some((x: string) => x.includes('FP_critical failed'))).toBe(true);
   });
 });
-

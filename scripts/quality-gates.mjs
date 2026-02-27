@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { ensureArtifactDir, getArtifactsRoot, resolveArtifactPath } from './artifacts-path.mjs';
 
 const DEFAULT_GATES = {
   latency: {
@@ -172,8 +173,8 @@ const main = () => {
     failures,
   };
 
-  const summaryPath = path.resolve(process.cwd(), 'benchmarks/reports/latest-gate-summary.json');
-  fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
+  ensureArtifactDir('benchmarks', 'reports');
+  const summaryPath = resolveArtifactPath('benchmarks', 'reports', 'latest-gate-summary.json');
   fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2), 'utf8');
 
   console.log('=== Amanah Quality Gates ===');
@@ -182,7 +183,8 @@ const main = () => {
   console.log(`FP_critical: ${fpCritical}`);
   console.log(`FN_critical: ${fnCritical}`);
   console.log(`latency p50/p95/p99: ${summary.metrics.p50LatencyMs}/${summary.metrics.p95LatencyMs}/${summary.metrics.p99LatencyMs} ms`);
-  console.log(`gate summary: benchmarks/reports/latest-gate-summary.json`);
+  console.log(`gate summary: ${path.relative(getArtifactsRoot(), summaryPath).replaceAll('\\', '/')}`);
+  console.log(`artifacts root: ${getArtifactsRoot()}`);
 
   if (summary.passed) {
     console.log('RESULT: PASS');
