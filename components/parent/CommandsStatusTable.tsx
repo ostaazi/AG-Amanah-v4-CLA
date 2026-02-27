@@ -18,8 +18,8 @@ const CommandsStatusTable: React.FC<CommandsStatusTableProps> = ({ lang, logs })
       {lang === 'ar' ? 'حالة الأوامر' : 'Command Status'}
     </h4>
     <div className="space-y-2">
-      {logs.slice(0, 12).map((log, idx) => (
-        <div key={log.command_id ? `${log.command_id}-${idx}` : idx} className="rounded-xl border border-slate-100 bg-slate-50 p-3 flex items-center justify-between gap-3">
+      {logs.slice(0, 12).map((log) => (
+        <div key={log.command_id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 flex items-center justify-between gap-3">
           <div className="text-right">
             <p className="text-sm font-black text-slate-900">{log.command_type}</p>
             <p className="text-[11px] font-bold text-slate-500">{log.child_id}</p>

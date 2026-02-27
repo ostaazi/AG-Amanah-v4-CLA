@@ -51,6 +51,38 @@ class AmanahAccessibilityService : AccessibilityService() {
         val patterns: Set<String>
     )
 
+    // System/OS packages that should never trigger content analysis.
+    // These generate harmless UI text (status bar, notifications, keyboard, etc.)
+    private val systemPackagePrefixes = setOf(
+        "com.android.systemui",
+        "com.android.settings",
+        "com.android.launcher",
+        "com.android.launcher3",
+        "com.google.android.apps.nexuslauncher",
+        "com.sec.android.app.launcher",
+        "com.miui.home",
+        "com.huawei.android.launcher",
+        "com.oppo.launcher",
+        "com.android.vending",
+        "com.android.packageinstaller",
+        "com.android.phone",
+        "com.android.dialer",
+        "com.android.contacts",
+        "com.android.keyguard",
+        "com.android.inputmethod",
+        "com.google.android.inputmethod",
+        "com.samsung.android.honeyboard",
+        "com.android.deskclock",
+        "com.android.calculator2",
+    )
+
+    private fun isSystemUiPackage(packageName: String): Boolean {
+        val pkg = packageName.lowercase(Locale.ROOT)
+        return systemPackagePrefixes.any { prefix ->
+            pkg == prefix || pkg.startsWith("$prefix.")
+        } || pkg.contains("launcher") || pkg.contains("systemui") || pkg.contains("inputmethod") || pkg.contains("keyboard")
+    }
+
     private val db = FirebaseFirestore.getInstance()
     private val serviceScope = CoroutineScope(Dispatchers.IO)
     private var lastProcessedText: String = ""
@@ -109,6 +141,7 @@ class AmanahAccessibilityService : AccessibilityService() {
 
         val packageName = event.packageName?.toString() ?: return
         if (packageName.contains("com.amanah.child")) return
+        if (isSystemUiPackage(packageName)) return
         rememberForegroundApp(packageName)
 
         if (isCameraMicPolicyActive() && isCameraOrMicSensitiveApp(packageName)) {

@@ -136,19 +136,6 @@ export interface ProactiveDefenseConfig {
   voiceRecordUrl?: string;
 }
 
-export interface ControlReadiness {
-  accessibilityEnabled: boolean;
-  deviceAdminEnabled: boolean;
-  remoteServiceRunning: boolean;
-  cameraPermissionGranted: boolean;
-  microphonePermissionGranted: boolean;
-  screenCaptureReady: boolean;
-  appControlReady: boolean;
-  liveCameraReady: boolean;
-  liveMicrophoneReady: boolean;
-  updatedAt?: Date | any;
-}
-
 export interface Child extends FamilyMember {
   parentId: string;
   deviceOwnerUid?: string;
@@ -170,7 +157,6 @@ export interface Child extends FamilyMember {
   riskScore?: { childScore: number; trend: 'up' | 'down' | 'stable' };
   riskProfile?: { isCompliant: boolean };
   defenseConfig?: ProactiveDefenseConfig;
-  controlReadiness?: ControlReadiness;
 }
 
 export type AlertProtocolMode = 'FULL' | 'SIMPLE' | 'NONE';
@@ -230,27 +216,7 @@ export interface MonitoringAlert {
   platform: string;
   content: string;
   imageData?: string;
-  audioData?: string;
-  audioMimeType?: string;
-  streamKind?: 'video' | 'audio';
-  streamSource?: string;
   captureStatus?: string;
-  evidencePayloadVersion?: string;
-  evidenceUploadStatus?: string;
-  evidenceUploadAttempt?: number;
-  evidenceUploadRetryCount?: number;
-  evidenceUploadCorrelationId?: string;
-  evidenceUploadLastError?: string;
-  evidenceUploadSource?: string;
-  evidenceUploadQueuedAt?: Date | any;
-  evidenceUploadLastAttemptAt?: Date | any;
-  evidenceUploadAckAt?: Date | any;
-  evidenceMissingFields?: string[];
-  evidenceCoreFieldCount?: number;
-  evidencePresentFieldCount?: number;
-  evidenceCompleteness?: number;
-  evidenceHasAllCoreFields?: boolean;
-  evidenceBundleSequence?: number;
   sourceLocation?: string;
   category: Category;
   severity: AlertSeverity;
@@ -261,31 +227,12 @@ export interface MonitoringAlert {
   latency?: string;
   suspectId?: string;
   status?: string;
-}
-
-export type ChildSignalEventType =
-  | 'search_intent'
-  | 'watch_intent'
-  | 'audio_transcript'
-  | 'link_intent'
-  | 'conversation_pattern'
-  | 'behavioral_drift';
-
-export interface ChildSignalEvent {
-  id: string;
-  parentId: string;
-  childId?: string;
-  childName?: string;
-  eventType: ChildSignalEventType;
-  source: string;
-  platform?: string;
-  content: string;
-  normalizedContent?: string;
-  severity?: AlertSeverity;
-  confidence?: number;
-  scenarioHints?: string[];
-  timestamp: Date;
-  context?: Record<string, any>;
+  triggerRawText?: string;
+  triggerNormalizedText?: string;
+  matchedSignals?: string[];
+  triggerType?: string;
+  analysisReasonAr?: string;
+  analysisReasonEn?: string;
 }
 
 export interface ParentMessage {

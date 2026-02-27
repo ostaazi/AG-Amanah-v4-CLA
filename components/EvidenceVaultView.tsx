@@ -305,6 +305,12 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
         targetHandle: '@unknown_user',
         deliveryStatus: '--',
         bundleStatus: '--',
+        triggerRawText: '',
+        triggerNormalizedText: '',
+        matchedSignals: [] as string[],
+        triggerType: '',
+        analysisReasonAr: '',
+        analysisReasonEn: '',
       };
     }
 
@@ -350,6 +356,15 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       ? `${Math.round(evidenceCompleteness * 100)}%${evidenceMissingFields.length > 0 ? ` | missing=${evidenceMissingFields.join(', ')}` : ''}`
       : '--';
 
+    const triggerRawText = String(selectedRecord.triggerRawText || '').trim();
+    const triggerNormalizedText = String(selectedRecord.triggerNormalizedText || '').trim();
+    const matchedSignals = Array.isArray(selectedRecord.matchedSignals)
+      ? (selectedRecord.matchedSignals as string[]).filter(Boolean)
+      : [];
+    const triggerType = String(selectedRecord.triggerType || '').trim();
+    const analysisReasonAr = String(selectedRecord.analysisReasonAr || '').trim();
+    const analysisReasonEn = String(selectedRecord.analysisReasonEn || '').trim();
+
     return {
       observedContent,
       detectionReason,
@@ -358,6 +373,12 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       targetHandle,
       deliveryStatus,
       bundleStatus,
+      triggerRawText,
+      triggerNormalizedText,
+      matchedSignals,
+      triggerType,
+      analysisReasonAr,
+      analysisReasonEn,
     };
   }, [selectedRecord]);
 
@@ -835,6 +856,55 @@ const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
                       {selectedRecordDetails.observedContent}
                     </p>
                   </div>
+                  {/* Trigger word / matched signals section */}
+                  {(selectedRecordDetails.matchedSignals.length > 0 || selectedRecordDetails.triggerRawText) && (
+                    <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+                      <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">
+                        الكلمات / الإشارات المحفزة
+                      </p>
+                      {selectedRecordDetails.triggerRawText && (
+                        <p className="text-xs font-bold text-red-800 leading-relaxed mb-2 break-words" dir="auto">
+                          {selectedRecordDetails.triggerRawText}
+                        </p>
+                      )}
+                      {selectedRecordDetails.triggerNormalizedText && selectedRecordDetails.triggerNormalizedText !== selectedRecordDetails.triggerRawText && (
+                        <p className="text-[11px] font-bold text-red-600 leading-relaxed mb-2 break-words" dir="auto">
+                          <span className="text-[9px] text-red-400 uppercase tracking-widest">NORMALIZED: </span>
+                          {selectedRecordDetails.triggerNormalizedText}
+                        </p>
+                      )}
+                      {selectedRecordDetails.matchedSignals.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {selectedRecordDetails.matchedSignals.map((signal, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-block px-2 py-0.5 rounded-lg bg-red-100 border border-red-200 text-[10px] font-black text-red-700 break-all"
+                            >
+                              {signal}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* Analysis reason bilingual */}
+                  {(selectedRecordDetails.analysisReasonAr || selectedRecordDetails.analysisReasonEn) && (
+                    <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3">
+                      <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-1">
+                        سبب الرصد
+                      </p>
+                      {selectedRecordDetails.analysisReasonAr && (
+                        <p className="text-xs font-bold text-amber-800 leading-relaxed" dir="rtl">
+                          {selectedRecordDetails.analysisReasonAr}
+                        </p>
+                      )}
+                      {selectedRecordDetails.analysisReasonEn && (
+                        <p className="text-xs font-bold text-amber-700 leading-relaxed mt-1" dir="ltr">
+                          {selectedRecordDetails.analysisReasonEn}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
                       سبب التصنيف غير اللائق
